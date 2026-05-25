@@ -1,0 +1,33 @@
+name: Weekly Podcast Ingestion
+
+on:
+  schedule:
+    # Every Wednesday at 6:00 AM UTC (around when ZEIT ONLINE publishes the podcast)
+    - cron: '0 6 * * 3'
+  workflow_dispatch: # Allows manual run from GitHub actions UI
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Ingestion Script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
+          RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }}
+        run: npx tsx scripts/ingest.ts

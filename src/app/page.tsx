@@ -222,6 +222,7 @@ export default function SearchPage() {
   const [duration, setDuration] = useState(0);
   const [playSpeed, setPlaySpeed] = useState<number>(1);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const isInitialParse = useRef(true);
 
   // Stats state
   const [stats, setStats] = useState<StatsData | null>(null);
@@ -476,10 +477,11 @@ export default function SearchPage() {
     setTimeout(() => window.open(url, '_blank'), 600);
   };
 
-  // ──── Deep Linking ────
+  // ──── Deep Linking & URL Sync ────
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const urlTab = params.get('tab');
     const urlQuery = params.get('q');
     const urlType = params.get('type') as any;
     const urlSpeakers = params.get('speakers');
@@ -491,6 +493,9 @@ export default function SearchPage() {
     let finalSpeakers = selectedSpeakers;
     let finalYear = selectedYear;
 
+    if (urlTab && ['search', 'browse', 'stats', 'about'].includes(urlTab)) {
+      setActiveTab(urlTab as any);
+    }
     if (urlType) { setSearchType(urlType); finalType = urlType; setShowFilters(true); }
     if (urlSpeakers) { const p = urlSpeakers.split(','); setSelectedSpeakers(p); finalSpeakers = p; setShowFilters(true); }
     if (urlYear) { setSelectedYear(urlYear); finalYear = urlYear; setShowFilters(true); }
@@ -505,8 +510,69 @@ export default function SearchPage() {
           }
         }
       });
+    } else if (urlEpisode && urlTime) {
+      // Direct deep link to a specific quote/episode (without search query)
+      fetch(`/api/episodes?id=${encodeURIComponent(urlEpisode)}`)
+        .then(res => {
+          if (!res.ok) throw new Error('Episode not found');
+          return res.json();
+        })
+        .then(data => {
+          const ep = data.episode;
+          if (ep) {
+            const mockResult = {
+              id: `chunk-${urlTime}`,
+              episode_id: ep.id,
+              speaker: 'Sprecher',
+              start_time: Number(urlTime),
+              end_time: Number(urlTime) + 10,
+              content: '',
+              title: ep.title,
+              audio_url: ep.audio_url,
+              pub_date: ep.pub_date,
+              similarity: 1.0
+            };
+            playChunk(mockResult, ep.audio_url, ep.title, ep.id);
+            showContext(mockResult);
+          }
+        })
+        .catch(err => console.error('Failed to load shared quote context:', err));
     }
+
+    setTimeout(() => {
+      isInitialParse.current = false;
+    }, 500);
   }, []);
+
+  // Sync state to URL search parameters live
+  useEffect(() => {
+    if (isInitialParse.current) return;
+
+    const params = new URLSearchParams();
+    if (activeTab !== 'search') {
+      params.set('tab', activeTab);
+    }
+    if (query.trim()) {
+      params.set('q', query.trim());
+    }
+    if (searchType !== 'semantic') {
+      params.set('type', searchType);
+    }
+    if (selectedSpeakers.length !== 4) {
+      params.set('speakers', selectedSpeakers.join(','));
+    }
+    if (selectedYear !== 'all') {
+      params.set('year', selectedYear);
+    }
+    if (currentAudio?.episodeId) {
+      params.set('episode', currentAudio.episodeId);
+      params.set('t', Math.floor(currentAudio.startTime).toString());
+    }
+
+    const newSearch = params.toString();
+    const newUrl = `${window.location.pathname}${newSearch ? '?' + newSearch : ''}`;
+    window.history.replaceState(null, '', newUrl);
+  }, [activeTab, query, searchType, selectedSpeakers, selectedYear, currentAudio?.episodeId, currentAudio?.startTime]);
 
   // Audio events
   useEffect(() => {

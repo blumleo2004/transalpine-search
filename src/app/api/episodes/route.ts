@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
   const page = parseInt(searchParams.get('page') || '1');
   const perPage = parseInt(searchParams.get('perPage') || '20');
   const year = searchParams.get('year') || 'all';
@@ -11,11 +12,26 @@ export async function GET(request: Request) {
   const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!hasSupabase) {
+    if (id) return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
     return NextResponse.json({ episodes: [], total: 0, page, perPage });
   }
 
   try {
     const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+
+    // If a single ID is requested
+    if (id) {
+      const { data: episode, error } = await supabase
+        .from('episodes')
+        .select('id, title, pub_date, audio_url')
+        .eq('id', id)
+        .single();
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 404 });
+      }
+      return NextResponse.json({ episode });
+    }
 
     // Build query
     let query = supabase
