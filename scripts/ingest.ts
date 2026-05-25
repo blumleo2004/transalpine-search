@@ -1,0 +1,821 @@
+import { createClient } from '@supabase/supabase-js';
+import Parser from 'rss-parser';
+import { OpenAI } from 'openai';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+import * as fs from 'fs';
+
+// Load environment variables from .env.local or process environment
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+dotenv.config();
+
+const RSS_FEED_URL = process.env.RSS_FEED_URL || 'https://feeds.simplecast.com/br4J_MDH';
+
+interface Utterance {
+  start: number;
+  end: number;
+  speaker: string | number;
+  transcript: string;
+}
+
+interface Chunk {
+  speaker: string;
+  start_time: number;
+  end_time: number;
+  content: string;
+}
+
+// Convert duration string "HH:MM:SS" or "MM:SS" or raw seconds to seconds integer
+function parseDuration(durationStr?: string): number {
+  if (!durationStr) return 0;
+  if (!isNaN(Number(durationStr))) return Math.round(Number(durationStr));
+  
+  const parts = durationStr.split(':').map(Number);
+  if (parts.some(isNaN)) return 0;
+  
+  if (parts.length === 3) {
+    // HH:MM:SS
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  } else if (parts.length === 2) {
+    // MM:SS
+    return parts[0] * 60 + parts[1];
+  }
+  return 0;
+}
+
+// Helper to group raw word objects into chunks by speaker and timing gap
+function groupWordsIntoChunks(words: any[]): Chunk[] {
+  const chunks: Chunk[] = [];
+  if (!words || words.length === 0) return chunks;
+
+  let currentChunk: {
+    speaker: string;
+    start_time: number;
+    end_time: number;
+    wordsList: string[];
+  } | null = null;
+
+  for (const w of words) {
+    const speakerLabel = `Sprecher ${w.speaker !== undefined ? w.speaker : '0'}`;
+    const wordText = w.punctuated_word || w.word;
+    if (!wordText) continue;
+    
+    if (!currentChunk) {
+      currentChunk = {
+        speaker: speakerLabel,
+        start_time: w.start,
+        end_time: w.end,
+        wordsList: [wordText]
+      };
+    } else {
+      const speakerChanged = currentChunk.speaker !== speakerLabel;
+      const pauseDuration = w.start - currentChunk.end_time;
+      const segmentTooLong = currentChunk.wordsList.length >= 80;
+
+      if (speakerChanged || pauseDuration > 2.0 || segmentTooLong) {
+        // Save current chunk
+        chunks.push({
+          speaker: currentChunk.speaker,
+          start_time: currentChunk.start_time,
+          end_time: currentChunk.end_time,
+          content: currentChunk.wordsList.join(' ')
+        });
+        // Start new chunk
+        currentChunk = {
+          speaker: speakerLabel,
+          start_time: w.start,
+          end_time: w.end,
+          wordsList: [wordText]
+        };
+      } else {
+        // Continue current chunk
+        currentChunk.wordsList.push(wordText);
+        currentChunk.end_time = w.end;
+      }
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push({
+      speaker: currentChunk.speaker,
+      start_time: currentChunk.start_time,
+      end_time: currentChunk.end_time,
+      content: currentChunk.wordsList.join(' ')
+    });
+  }
+
+  return chunks;
+}
+
+// Helper to chunk utterances by speaker and word limit
+function chunkUtterances(utterances: Utterance[]): Chunk[] {
+  const chunks: Chunk[] = [];
+  let currentChunk: {
+    speaker: string;
+    start_time: number;
+    end_time: number;
+    transcriptParts: string[];
+    wordCount: number;
+  } | null = null;
+
+  for (const utt of utterances) {
+    const speakerLabel = `Sprecher ${utt.speaker}`;
+    const text = utt.transcript.trim();
+    if (!text) continue;
+    const wordCount = text.split(/\s+/).length;
+
+    if (!currentChunk) {
+      currentChunk = {
+        speaker: speakerLabel,
+        start_time: utt.start,
+        end_time: utt.end,
+        transcriptParts: [text],
+        wordCount: wordCount
+      };
+    } else if (currentChunk.speaker === speakerLabel && currentChunk.wordCount + wordCount < 90) {
+      currentChunk.transcriptParts.push(text);
+      currentChunk.end_time = utt.end;
+      currentChunk.wordCount += wordCount;
+    } else {
+      chunks.push({
+        speaker: currentChunk.speaker,
+        start_time: currentChunk.start_time,
+        end_time: currentChunk.end_time,
+        content: currentChunk.transcriptParts.join(' ')
+      });
+      currentChunk = {
+        speaker: speakerLabel,
+        start_time: utt.start,
+        end_time: utt.end,
+        transcriptParts: [text],
+        wordCount: wordCount
+      };
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push({
+      speaker: currentChunk.speaker,
+      start_time: currentChunk.start_time,
+      end_time: currentChunk.end_time,
+      content: currentChunk.transcriptParts.join(' ')
+    });
+  }
+
+  return chunks;
+}
+
+// Automatically resolve speaker identities using LLM semantic heuristics on a sample of chunks
+async function resolveSpeakerNames(chunks: Chunk[], openai: OpenAI | null): Promise<Record<string, string>> {
+  const mapping: Record<string, string> = {};
+  if (!openai || chunks.length === 0) return mapping;
+
+  console.log('Analyzing speaker dialogue patterns with OpenAI to identify hosts...');
+
+  const speakerLabels = Array.from(new Set(chunks.map(c => c.speaker))).sort();
+  
+  // Strategy: take first 20 chunks (hosts greet each other by name at the start)
+  // + up to 25 chunks spread across the episode (for geographic context clues)
+  const openingChunks = chunks.slice(0, 20);
+  const step = Math.max(1, Math.floor(chunks.length / 25));
+  const spreadChunks: typeof chunks = [];
+  for (let i = 20; i < chunks.length; i += step) {
+    spreadChunks.push(chunks[i]);
+    if (spreadChunks.length >= 25) break;
+  }
+  const sampleChunks = [...openingChunks, ...spreadChunks];
+
+  const sampleText = sampleChunks
+    .map(c => `[${c.speaker}]: "${c.content}"`)
+    .join('\n');
+
+  const prompt = `
+Du bist ein Experte für den ZEIT-Podcast "Servus. Grüezi. Hallo." mit den drei festen Moderatoren:
+- Matthias Daum (Schweizer, nennt Orte wie Zürich, Bern, Genf, sagt "bei uns in der Schweiz")
+- Florian Gasser (Österreicher, nennt Orte wie Wien, Graz, Innsbruck, sagt "bei uns in Österreich")
+- Lenz Jacobsen (Deutscher, nennt Orte wie Berlin, Hamburg, Deutschland, sagt "bei uns in Deutschland")
+
+Manchmal gibt es Gäste oder Vertretungen (z. B. wenn einer der drei fehlt).
+
+WICHTIG: Am Anfang einer Episode begrüßen sich die Hosts fast immer namentlich, z. B.:
+"Hallo Florian, hallo Lenz!" — das ist der stärkste Hinweis auf die Sprecherzuordnung.
+
+Analysiere das folgende Transkript-Fragment sorgfältig und ordne die Sprecherzuordnung für alle erkannten Sprecher zu:
+${speakerLabels.map(s => `- ${s}`).join('\n')}
+
+Transkript-Ausschnitt (Anfang der Episode + weitere Stellen):
+${sampleText}
+
+Gib das Ergebnis AUSSCHLIESSLICH als JSON-Objekt zurück. Ordne jedem Sprecherlabel den echten Namen ("Matthias Daum", "Florian Gasser", "Lenz Jacobsen") oder "Gast" (falls es ein Gast oder eine andere Person ist) zu.
+Beispiel:
+{
+  ${speakerLabels.map(s => `"${s}": "Matthias Daum"`).join(',\n  ')}
+}
+`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' }
+    });
+
+    const resultText = response.choices[0].message.content || '{}';
+    const parsed = JSON.parse(resultText);
+    
+    console.log('Detected speaker mapping:', parsed);
+    return parsed;
+  } catch (err: any) {
+    console.error('Failed to resolve speaker names automatically:', err.message);
+    return {};
+  }
+}
+
+// Chronological LLM speaker validation/correction on chunks
+async function correctMergedSpeakers(chunks: Chunk[], openai: OpenAI | null): Promise<Chunk[]> {
+  if (!openai || chunks.length === 0) return chunks;
+
+  console.log('Running chronological LLM speaker validation/correction on chunks...');
+  const batchSize = 35;
+  const contextOverlap = 3;
+
+  for (let i = 0; i < chunks.length; i += batchSize) {
+    const startIdx = i;
+    const endIdx = Math.min(chunks.length, i + batchSize);
+    const currentBatch = chunks.slice(startIdx, endIdx);
+
+    const prevContext = startIdx > 0
+      ? chunks.slice(Math.max(0, startIdx - contextOverlap), startIdx)
+      : [];
+
+    const promptContext = prevContext
+      .map(c => `[CONTEXT] [${c.speaker}] (${c.start_time}s): "${c.content}"`)
+      .join('\n');
+
+    const promptBatch = currentBatch
+      .map((c, idx) => `[INDEX: ${startIdx + idx}] (Current: ${c.speaker}) (${c.start_time}s): "${c.content}"`)
+      .join('\n');
+
+    const prompt = `Du bist ein Sprachexperte für den wöchentlichen ZEIT-Podcast "Servus. Grüezi. Hallo." mit den drei Moderatoren:
+- Matthias Daum (Schweizer, sagt "Grüezi", redet über Schweizer Themen wie SRG, Zürich, Abstimmungen, Kantone, sagt "bei uns in der Schweiz")
+- Florian Gasser (Österreicher, sagt "Servus", redet über Österreich, Wien, Bundesländer, die ÖVP/FPÖ, sagt "bei uns in Österreich", nutzt Worte wie "bissel", "Schas", "Jänner")
+- Lenz Jacobsen (Deutscher, sagt "Hallo", redet über Deutschland, Berlin, die Ampel, Scholz, CDU, sagt "bei uns in Deutschland")
+
+Manchmal gibt es auch Gäste oder Werbung (diese sollten als "Gast" klassifiziert werden).
+
+Aufgrund von Fehlern bei der automatischen Spracherkennung (Diarisierung) wurden manche Sprecher fälschlicherweise zusammengelegt (z. B. wurden Sätze von Matthias Daum oder Lenz Jacobsen als Florian Gasser markiert). Deine Aufgabe ist es, für jeden Redebeitrag (gekennzeichnet durch INDEX) den korrekten Sprecher zu bestimmen.
+
+Achte besonders auf den Gesprächsfluss:
+- Wenn ein Moderator eine Frage stellt (z. B. "Matthias, was meinst du dazu?"), antwortet in der Regel Matthias Daum im nächsten Beitrag.
+- Wenn consecutive Beiträge des gleichen Sprechers miteinander diskutieren, liegt oft ein Diarisierungsfehler vor und einer der Beiträge gehört einem anderen Host.
+- Achte auf die landesspezifischen Bezüge und typische Dialektwörter.
+
+Hier ist der vorherige Kontext (nur zur Information, nicht zu ändern):
+\${promptContext}
+
+Hier sind die zu klassifizierenden Beiträge:
+\${promptBatch}
+
+Gib ein JSON-Objekt zurück, das für jeden INDEX aus den zu klassifizierenden Beiträgen den korrekten Namen enthält. Das Format MUSS exakt so aussehen:
+{
+  "reasoning": "Kurze Begründung für schwierige Fälle",
+  "corrections": {
+    "INDEX_Zahl_1": "Matthias Daum",
+    "INDEX_Zahl_2": "Florian Gasser",
+    "INDEX_Zahl_3": "Lenz Jacobsen",
+    "INDEX_Zahl_4": "Gast"
+  }
+}
+Ordne JEDEM INDEX in den corrections den korrekten Namen zu! Verwende nur die vier exakten Werte: "Matthias Daum", "Florian Gasser", "Lenz Jacobsen", "Gast".`;
+
+    let success = false;
+    let retries = 3;
+
+    while (retries > 0 && !success) {
+      try {
+        const response = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          response_format: { type: 'json_object' }
+        });
+
+        const rawContent = response.choices[0].message.content || '{}';
+        const parsed = JSON.parse(rawContent);
+        const corrections: Record<string, string> = parsed.corrections || {};
+
+        for (let idx = startIdx; idx < endIdx; idx++) {
+          const correctSpeaker = corrections[idx.toString()];
+          if (correctSpeaker && correctSpeaker !== chunks[idx].speaker) {
+            console.log(`  🔄 LLM correction at index \${idx} (\${chunks[idx].start_time}s): "\${chunks[idx].speaker}" ➔ "\${correctSpeaker}"`);
+            chunks[idx].speaker = correctSpeaker;
+          }
+        }
+        success = true;
+      } catch (err: any) {
+        retries--;
+        console.error(`  ⚠️ Error in LLM speaker validation (retries left: \${retries}):`, err.message);
+        if (retries > 0) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+    }
+  }
+
+  return chunks;
+}
+
+
+// Mock transcription generator for testing
+function generateMockUtterances(title: string, durationSeconds: number): Utterance[] {
+  const hosts = ['0', '1', '2']; // Mapped to Matthias, Florian, Lenz
+  const mockStatements = [
+    "Servus, Grüezi und Hallo zu einer neuen Ausgabe unseres transalpinen Podcasts.",
+    "Hallo Matthias, hallo Lenz! Diese Woche wollen wir uns intensiv mit der Frage der Energiewende beschäftigen.",
+    "Genau, besonders die Windkraft in den Alpen sorgt ja in Österreich, der Schweiz und Deutschland für viel Diskussionsstoff.",
+    "Matthias, wie sieht denn die Lage in der Schweiz aus? Da gibt es doch starke Widerstände, oder?",
+    "Ja, Florian. In der Schweiz blockieren Naturschutzverbände und lokale Initiativen viele geplante Windparks.",
+    "Aber das Bundesgericht hat kürzlich einige Urteile gefällt, die den Bau von Windrädern in alpinen Regionen erleichtern könnten.",
+    "Bei uns in Österreich ist das ähnlich. Auf den Kämmen der Steiermark stehen schon einige Räder, aber im Westen ist es fast unmöglich.",
+    "In Deutschland wird ja auch gestritten. Die 10H-Regel in Bayern war lange Zeit ein großes Hindernis.",
+    "Mittlerweile wird aber versucht, diese Regeln aufzuweichen, um den Ausbau der erneuerbaren Energien zu beschleunigen.",
+    "Wir müssen uns fragen: Was wiegt schwerer? Der Landschaftsschutz oder die Notwendigkeit von grünem Strom?",
+    "Das ist eine klassische transalpine Abwägung. Und damit kommen wir auch gleich zu unserem zweiten Thema heute...",
+    "Vielen Dank für diesen Einblick. Wir hören uns nächste Woche wieder bei Servus. Grüezi. Hallo!"
+  ];
+
+  const utterances: Utterance[] = [];
+  let currentTime = 5.0; // start after 5 seconds intro
+  const segmentDuration = durationSeconds / (mockStatements.length + 2);
+
+  for (let i = 0; i < mockStatements.length; i++) {
+    const speaker = hosts[i % hosts.length];
+    const duration = Math.min(segmentDuration, 15 + Math.random() * 10);
+    
+    utterances.push({
+      start: parseFloat(currentTime.toFixed(2)),
+      end: parseFloat((currentTime + duration).toFixed(2)),
+      speaker: speaker,
+      transcript: mockStatements[i]
+    });
+    
+    currentTime += duration + 1.0; // add a small pause
+  }
+
+  return utterances;
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  const limitArgIndex = args.indexOf('--limit');
+  const limit = limitArgIndex !== -1 ? parseInt(args[limitArgIndex + 1], 10) : null;
+  const episodeArgIndex = args.indexOf('--episode');
+  const targetEpisodeId = episodeArgIndex !== -1 ? args[episodeArgIndex + 1] : null;
+  const force = args.includes('--force');
+  const preScan = args.includes('--pre-scan');
+
+  console.log('--- STARTING INGESTION PIPELINE ---');
+  console.log(`Limit: ${limit !== null ? limit : 'None'}`);
+  console.log(`Specific Episode: ${targetEpisodeId || 'None'}`);
+  console.log(`Force Update: ${force}`);
+  console.log(`Pre-Scan / Dry Run: ${preScan}`);
+
+  // Check API keys
+  const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const hasDeepgram = !!process.env.DEEPGRAM_API_KEY;
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+
+  console.log('\n--- ENVIRONMENT CHECK ---');
+  console.log(`Supabase Configured: ${hasSupabase ? 'YES' : 'NO (Mock mode for database)'}`);
+  console.log(`Deepgram API Key: ${hasDeepgram ? 'YES' : 'NO (Generating mock transcripts)'}`);
+  console.log(`OpenAI API Key: ${hasOpenAI ? 'YES' : 'NO (Generating mock vector embeddings)'}`);
+  console.log('-------------------------\n');
+
+  // Initialize clients
+  const supabase = hasSupabase 
+    ? createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    : null;
+    
+  const openai = hasOpenAI 
+    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    : null;
+
+  // Parse RSS Feed
+  console.log(`Fetching RSS feed from: ${RSS_FEED_URL}...`);
+  const parser = new Parser();
+  let feed;
+  try {
+    feed = await parser.parseURL(RSS_FEED_URL);
+    console.log(`Successfully fetched feed! Found ${feed.items.length} episodes.`);
+  } catch (err: any) {
+    console.error('Error fetching RSS feed:', err.message);
+    process.exit(1);
+  }
+
+  // Filter episodes
+  let episodesToProcess = feed.items;
+  if (targetEpisodeId) {
+    episodesToProcess = episodesToProcess.filter(item => item.guid === targetEpisodeId || item.id === targetEpisodeId);
+    if (episodesToProcess.length === 0) {
+      console.error(`Episode with ID ${targetEpisodeId} not found in RSS feed.`);
+      process.exit(1);
+    }
+  }
+
+  // If not force mode, filter out episodes that are already in the database
+  if (supabase && !force && !targetEpisodeId) {
+    console.log('Querying Supabase to filter out already indexed episodes...');
+    try {
+      const { data: existingEps, error: fetchErr } = await supabase
+        .from('episodes')
+        .select('id');
+      if (fetchErr) throw fetchErr;
+      const existingIds = new Set((existingEps || []).map(e => e.id));
+      const beforeCount = episodesToProcess.length;
+      episodesToProcess = episodesToProcess.filter(item => {
+        const episodeId = item.guid || item.id || '';
+        return !existingIds.has(episodeId);
+      });
+      console.log(`Filtered out ${beforeCount - episodesToProcess.length} already indexed episodes. ${episodesToProcess.length} pending.`);
+    } catch (err: any) {
+      console.error('Failed to pre-filter indexed episodes, will check during loop:', err.message);
+    }
+  }
+
+  if (limit !== null) {
+    episodesToProcess = episodesToProcess.slice(0, limit);
+  }
+
+
+  // PRE-SCAN / DRY RUN MODE
+  if (preScan) {
+    console.log('\n==================================================');
+    console.log('             INGESTION PRE-SCAN REPORT             ');
+    console.log('==================================================\n');
+    console.log(`Total episodes found in RSS Feed: ${episodesToProcess.length}`);
+
+    let indexedCount = 0;
+    let pendingCount = 0;
+    let pendingSeconds = 0;
+    const pendingList: string[] = [];
+
+    if (supabase) {
+      console.log('Checking Supabase database for existing episodes...');
+      for (const item of episodesToProcess) {
+        const episodeId = item.guid || item.id || '';
+        const durationSeconds = parseDuration(item.itunes?.duration);
+        
+        const { data: existingEpisode } = await supabase
+          .from('episodes')
+          .select('id')
+          .eq('id', episodeId)
+          .single();
+
+        if (existingEpisode && !force) {
+          indexedCount++;
+        } else {
+          pendingCount++;
+          pendingSeconds += durationSeconds;
+          pendingList.push(`- ${item.title} (${Math.round(durationSeconds / 60)} min)`);
+        }
+      }
+    } else {
+      console.log('No database connected, listing all episodes as pending.');
+      pendingCount = episodesToProcess.length;
+      pendingSeconds = episodesToProcess.reduce((acc, item) => acc + parseDuration(item.itunes?.duration), 0);
+    }
+
+    const pendingHours = (pendingSeconds / 3600).toFixed(2);
+    // Cost estimation: Deepgram Nova-2 is approx $0.258 per hour ($0.0043/min)
+    const deepgramCost = (Number(pendingHours) * 0.258).toFixed(2);
+    // Cost estimation: OpenAI text-embedding-3-small is $0.02 per 1M tokens. 
+    // Approx 13k tokens (10k words) per episode * pendingCount
+    const openaiCost = (pendingCount * 13000 * 0.00000002).toFixed(4);
+
+    console.log(`\nStatus Summary:`);
+    console.log(`  ✓ Already Indexed:     ${indexedCount} episodes`);
+    console.log(`  ➔ Pending Ingestion:   ${pendingCount} episodes`);
+    console.log(`  ➔ Total Audio Pending: ${pendingHours} hours`);
+    
+    console.log(`\nCost & Time Estimates:`);
+    console.log(`  • Deepgram (Nova-2 API):      ~$${deepgramCost}`);
+    console.log(`  • OpenAI (Embeddings API):    ~$${openaiCost}`);
+    console.log(`  • Estimated Total Duration:   ~${(pendingCount * 0.75).toFixed(1)} minutes (approx 45s per episode)`);
+
+    if (pendingList.length > 0) {
+      console.log(`\nPending Ingestion List (Up to 10):`);
+      pendingList.slice(0, 10).forEach(line => console.log(line));
+      if (pendingList.length > 10) {
+        console.log(`  ... and ${pendingList.length - 10} more.`);
+      }
+    }
+
+    console.log('\n==================================================');
+    console.log('To run this ingestion, execute without --pre-scan.');
+    console.log('==================================================\n');
+    process.exit(0);
+  }
+
+  console.log(`Processing ${episodesToProcess.length} episodes...\n`);
+
+  for (const item of episodesToProcess) {
+    const episodeId = item.guid || item.id || '';
+    const title = item.title || 'Unknown Title';
+    const audioUrl = item.enclosure?.url || '';
+    let pubDate = item.isoDate || item.pubDate || new Date().toISOString();
+    
+    // Check if it's a bulk-imported archived episode with incorrect October 7, 2025 date
+    const parsedDate = new Date(pubDate);
+    const isBulkImport = parsedDate.getUTCFullYear() === 2025 &&
+                         parsedDate.getUTCMonth() === 9 && // October is 9
+                         parsedDate.getUTCDate() === 7 &&
+                         (parsedDate.getUTCHours() === 13 || parsedDate.getUTCHours() === 14);
+                         
+    if (isBulkImport && item.itunes?.order) {
+      const order = parseInt(item.itunes.order);
+      if (!isNaN(order) && order > 0) {
+        const baseDate = new Date('2026-05-20T04:55:06Z');
+        const baseOrder = 404;
+        const weeksDiff = baseOrder - order;
+        const correctedDate = new Date(baseDate.getTime() - weeksDiff * 7 * 24 * 60 * 60 * 1000);
+        pubDate = correctedDate.toISOString();
+        console.log(`  [Date Correction] Corrected bulk-imported episode date using Order ${order} -> ${pubDate}`);
+      }
+    }
+
+    const durationSeconds = parseDuration(item.itunes?.duration);
+    const description = item.contentSnippet || item.content || item.summary || '';
+    const imageUrl = item.itunes?.image || feed.image?.url || '';
+
+    if (!episodeId) {
+      console.log(`Skipping item without ID: "${title}"`);
+      continue;
+    }
+
+    if (!audioUrl) {
+      console.log(`Skipping episode without audio URL: "${title}" (ID: ${episodeId})`);
+      continue;
+    }
+
+    console.log(`=== Processing: "${title}" (ID: ${episodeId}) ===`);
+
+    // Check if already processed in database
+    if (supabase && !force) {
+      const { data: existingEpisode } = await supabase
+        .from('episodes')
+        .select('id')
+        .eq('id', episodeId)
+        .single();
+
+      if (existingEpisode) {
+        console.log(`Episode already exists in database. Skipping. (Use --force to re-process)`);
+        continue;
+      }
+    }
+
+    let chunks: Chunk[] = [];
+
+    // Step 1: Transcription & Step 2: Chunking
+    if (hasDeepgram) {
+      console.log(`Requesting transcription from Deepgram for audio URL: ${audioUrl}...`);
+      try {
+        const queryParams = new URLSearchParams({
+          model: 'nova-2',
+          language: 'de',
+          diarize: 'true',
+          punctuate: 'true',
+          utterances: 'true'
+        });
+        
+        const response = await fetch(`https://api.deepgram.com/v1/listen?${queryParams}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Token ${process.env.DEEPGRAM_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ url: audioUrl })
+        });
+
+        if (!response.ok) {
+          const errMsg = await response.text();
+          throw new Error(`Deepgram API returned status ${response.status}: ${errMsg}`);
+        }
+
+        const data: any = await response.json();
+        const words = data.results?.channels?.[0]?.alternatives?.[0]?.words;
+        
+        if (words && words.length > 0) {
+          console.log(`Using word-level diarization to group ${words.length} words...`);
+          chunks = groupWordsIntoChunks(words);
+        } else if (data.results?.utterances) {
+          console.log(`Fallback: Using utterance-level diarization...`);
+          const utterances = data.results.utterances.map((utt: any) => ({
+            start: utt.start,
+            end: utt.end,
+            speaker: utt.speaker,
+            transcript: utt.transcript
+          }));
+          chunks = chunkUtterances(utterances);
+        } else {
+          throw new Error('Deepgram transcript has unexpected format (no words or utterances)');
+        }
+        
+        console.log(`Successfully chunked transcript. Total chunks: ${chunks.length}`);
+      } catch (err: any) {
+        console.error(`Deepgram transcription failed for "${title}":`, err.message);
+        console.log(`Skipping episode "${title}" to avoid writing mock data.`);
+        continue;
+      }
+    } else {
+      console.log('Generating mock diarized transcript...');
+      const utterances = generateMockUtterances(title, durationSeconds || 3600);
+      chunks = chunkUtterances(utterances);
+    }
+
+    // Step 2.5: Auto-identify speakers
+    const speakerMapping = await resolveSpeakerNames(chunks, openai);
+    if (Object.keys(speakerMapping).length > 0) {
+      console.log('Applying speaker identification mapping to chunks...');
+      for (const chunk of chunks) {
+        if (speakerMapping[chunk.speaker]) {
+          chunk.speaker = speakerMapping[chunk.speaker];
+        }
+      }
+    }
+
+    // Step 2.6: Chronological LLM speaker validation/correction
+    if (openai) {
+      await correctMergedSpeakers(chunks, openai);
+    }
+
+    // Step 3: Vektorization & Supabase Insertions
+    console.log(`Vectorizing chunks...`);
+    const processedChunks = [];
+    
+    // Process in batches to avoid API rate limits
+    const batchSize = 10;
+    for (let i = 0; i < chunks.length; i += batchSize) {
+      const batch = chunks.slice(i, i + batchSize);
+      console.log(`  Processing chunk batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(chunks.length / batchSize)}...`);
+      
+      const batchPromises = batch.map(async (chunk) => {
+        let embedding: number[] = [];
+        if (openai) {
+          try {
+            const embResponse = await openai.embeddings.create({
+              model: 'text-embedding-3-small',
+              input: chunk.content,
+              encoding_format: 'float'
+            });
+            embedding = embResponse.data[0].embedding;
+          } catch (err: any) {
+            console.error(`  Embedding generation failed for chunk: "${chunk.content.substring(0, 30)}...":`, err.message);
+            // Fallback to mock embedding on error
+            embedding = Array.from({ length: 1536 }, () => (Math.random() - 0.5) * 0.1);
+          }
+        } else {
+          // Mock embedding
+          embedding = Array.from({ length: 1536 }, () => (Math.random() - 0.5) * 0.1);
+        }
+        return {
+          ...chunk,
+          embedding
+        };
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      processedChunks.push(...batchResults);
+    }
+
+    // Step 4: Write to DB or write to mock local file
+    if (supabase) {
+      console.log('Writing episode and chunks to Supabase...');
+      try {
+        // Upsert episode
+        const { error: epError } = await supabase
+          .from('episodes')
+          .upsert({
+            id: episodeId,
+            title,
+            pub_date: pubDate,
+            audio_url: audioUrl,
+            image_url: imageUrl,
+            description,
+            duration: durationSeconds
+          });
+
+        if (epError) throw epError;
+
+        // Insert chunks (delete existing if force updating)
+        if (force) {
+          await supabase
+            .from('transcript_chunks')
+            .delete()
+            .eq('episode_id', episodeId);
+        }
+
+        const dbChunks = processedChunks.map(c => ({
+          episode_id: episodeId,
+          speaker: c.speaker,
+          start_time: c.start_time,
+          end_time: c.end_time,
+          content: c.content,
+          embedding: c.embedding
+        }));
+
+        // Insert in smaller batches of 1 with retries to avoid statement timeouts
+        const chunkBatchSize = 1;
+        for (let j = 0; j < dbChunks.length; j += chunkBatchSize) {
+          const dbBatch = dbChunks.slice(j, j + chunkBatchSize);
+          
+          if (j % 50 === 0) {
+            console.log(`    Ingesting chunk ${j}/${dbChunks.length}...`);
+          }
+          
+          let retries = 3;
+          let success = false;
+          while (retries > 0 && !success) {
+            const { error: chunkError } = await supabase
+              .from('transcript_chunks')
+              .insert(dbBatch);
+            
+            if (!chunkError) {
+              success = true;
+            } else {
+              retries--;
+              console.error(`    Insert failed at chunk ${j}: ${chunkError.message}. Retrying in 1.5s... (${retries} retries left)`);
+              if (retries === 0) throw chunkError;
+              await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+          }
+          
+          // Tiny delay between batches to keep the database stable
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        console.log(`Successfully ingested episode "${title}" and its ${dbChunks.length} chunks into Supabase!`);
+      } catch (err: any) {
+        console.error('Failed to write to Supabase:', err.message);
+        try {
+          console.log(`Rollback: Deleting empty/incomplete episode "${title}" (ID: ${episodeId}) from Supabase...`);
+          await supabase.from('episodes').delete().eq('id', episodeId);
+        } catch (rollbackErr: any) {
+          console.error('Rollback failed:', rollbackErr.message);
+        }
+        writeToMockFile(episodeId, title, pubDate, audioUrl, imageUrl, description, durationSeconds, processedChunks);
+      }
+    } else {
+      writeToMockFile(episodeId, title, pubDate, audioUrl, imageUrl, description, durationSeconds, processedChunks);
+    }
+  }
+
+  console.log('\n--- INGESTION PIPELINE COMPLETED ---');
+}
+
+function writeToMockFile(
+  episodeId: string, 
+  title: string, 
+  pubDate: string, 
+  audioUrl: string, 
+  imageUrl: string, 
+  description: string, 
+  durationSeconds: number, 
+  chunks: any[]
+) {
+  const dir = path.join(process.cwd(), 'scratch');
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const cleanId = episodeId.replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = path.join(dir, `mock_ingest_${cleanId}.json`);
+  
+  // Strip embeddings out of the printed console log so it doesn't clutter output,
+  // but keep them in the JSON file
+  const printableChunks = chunks.map(c => ({
+    speaker: c.speaker,
+    start_time: c.start_time,
+    end_time: c.end_time,
+    content: c.content,
+    embedding_length: c.embedding.length
+  }));
+
+  console.log(`Writing mock data for "${title}" to local file: ${filename}...`);
+  fs.writeFileSync(filename, JSON.stringify({
+    episode: {
+      id: episodeId,
+      title,
+      pub_date: pubDate,
+      audio_url: audioUrl,
+      image_url: imageUrl,
+      description,
+      duration: durationSeconds
+    },
+    chunks: chunks
+  }, null, 2));
+
+  console.log(`Mock Summary: Ingested episode "${title}" with ${chunks.length} chunks. (Embeddings simulated)`);
+}
+
+main().catch((err) => {
+  console.error('Fatal pipeline error:', err);
+  process.exit(1);
+});
