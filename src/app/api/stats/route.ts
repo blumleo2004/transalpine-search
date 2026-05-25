@@ -86,41 +86,33 @@ export async function GET() {
       'Gäste & Sonstige': guestsCount,
     };
 
-    const eps2025 = episodes.filter(e => new Date(e.pub_date).getFullYear() === 2025).map(e => e.id);
-    const eps2026 = episodes.filter(e => new Date(e.pub_date).getFullYear() === 2026).map(e => e.id);
+    const uniqueYears = Array.from(new Set(episodes.map(e => new Date(e.pub_date).getFullYear()))).sort();
+    const speakerSharesByYear: Record<string, any> = {};
 
-    const [
-      m2025, f2025, l2025, total2025,
-      m2026, f2026, l2026, total2026
-    ] = await Promise.all([
-      eps2025.length > 0 ? supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).eq('speaker', 'Matthias Daum').in('episode_id', eps2025) : { count: 0 },
-      eps2025.length > 0 ? supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).eq('speaker', 'Florian Gasser').in('episode_id', eps2025) : { count: 0 },
-      eps2025.length > 0 ? supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).eq('speaker', 'Lenz Jacobsen').in('episode_id', eps2025) : { count: 0 },
-      eps2025.length > 0 ? supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).in('episode_id', eps2025) : { count: 0 },
-      
-      eps2026.length > 0 ? supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).eq('speaker', 'Matthias Daum').in('episode_id', eps2026) : { count: 0 },
-      eps2026.length > 0 ? supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).eq('speaker', 'Florian Gasser').in('episode_id', eps2026) : { count: 0 },
-      eps2026.length > 0 ? supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).eq('speaker', 'Lenz Jacobsen').in('episode_id', eps2026) : { count: 0 },
-      eps2026.length > 0 ? supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).in('episode_id', eps2026) : { count: 0 },
-    ]);
+    await Promise.all(uniqueYears.map(async (year) => {
+      const epsInYear = episodes.filter(e => new Date(e.pub_date).getFullYear() === year).map(e => e.id);
+      if (epsInYear.length === 0) return;
 
-    const g2025 = Math.max(0, (total2025.count || 0) - (m2025.count || 0) - (f2025.count || 0) - (l2025.count || 0));
-    const g2026 = Math.max(0, (total2026.count || 0) - (m2026.count || 0) - (f2026.count || 0) - (l2026.count || 0));
+      const [mRes, fRes, lRes, totalRes] = await Promise.all([
+        supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).eq('speaker', 'Matthias Daum').in('episode_id', epsInYear),
+        supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).eq('speaker', 'Florian Gasser').in('episode_id', epsInYear),
+        supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).eq('speaker', 'Lenz Jacobsen').in('episode_id', epsInYear),
+        supabase.from('transcript_chunks').select('id', { count: 'exact', head: true }).in('episode_id', epsInYear),
+      ]);
 
-    const speakerSharesByYear = {
-      '2025': {
-        'Matthias Daum': m2025.count || 0,
-        'Florian Gasser': f2025.count || 0,
-        'Lenz Jacobsen': l2025.count || 0,
-        'Gäste & Sonstige': g2025,
-      },
-      '2026': {
-        'Matthias Daum': m2026.count || 0,
-        'Florian Gasser': f2026.count || 0,
-        'Lenz Jacobsen': l2026.count || 0,
-        'Gäste & Sonstige': g2026,
-      }
-    };
+      const mCount = mRes.count || 0;
+      const fCount = fRes.count || 0;
+      const lCount = lRes.count || 0;
+      const tCount = totalRes.count || 0;
+      const gCount = Math.max(0, tCount - mCount - fCount - lCount);
+
+      speakerSharesByYear[year.toString()] = {
+        'Matthias Daum': mCount,
+        'Florian Gasser': fCount,
+        'Lenz Jacobsen': lCount,
+        'Gäste & Sonstige': gCount
+      };
+    }));
 
     // Retrieve the exact transcript chunk count only for the top 5 longest duration episodes
     const topEps = topEpsRes.data || [];
@@ -177,7 +169,11 @@ export async function GET() {
       { label: 'Grenze 🚧', query: 'Grenze' },
       { label: 'Initiative 🇨🇭', query: 'Initiative' },
       { label: 'Kanton 🇨🇭', query: 'Kanton' },
-      { label: 'Bundesland 🇩🇪/🇦🇹', query: 'Bundesland' }
+      { label: 'Bundesland 🇩🇪/🇦🇹', query: 'Bundesland' },
+      { label: 'Matura 🇦🇹/🇨🇭', query: 'Matura' },
+      { label: 'Abitur 🇩🇪', query: 'Abitur' },
+      { label: 'Spital 🇦🇹/🇨🇭', query: 'Spital' },
+      { label: 'Krankenhaus 🇩🇪', query: 'Krankenhaus' }
     ];
 
 

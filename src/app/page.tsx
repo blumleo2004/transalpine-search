@@ -1198,7 +1198,7 @@ export default function SearchPage() {
                 {/* ── Speaker Trend comparison Chart ── */}
                 {stats.speakerSharesByYear && (
                   <div className={styles.chartCard} style={{ marginTop: '24px' }}>
-                    <h3 className={styles.chartTitle}>📈 Sprechanteile im Vergleich (2025 vs. 2026)</h3>
+                    <h3 className={styles.chartTitle}>📈 Sprechanteile im Jahresvergleich</h3>
                     <div className={styles.trendChartContainer}>
                       {Object.entries(stats.speakerSharesByYear).map(([year, shares]) => {
                         const total = Object.values(shares).reduce((a, b) => a + b, 0);
@@ -1351,38 +1351,7 @@ export default function SearchPage() {
                   </div>
                 )}
 
-                {/* ── Das transalpine Erwähnungsbarometer ── */}
-                {stats.keywordMentions && stats.keywordMentions.length > 0 && (
-                  <div className={styles.chartCard} style={{ marginTop: '24px' }}>
-                    <h3 className={styles.chartTitle}>📊 Das transalpine Erwähnungsbarometer</h3>
-                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '-8px', marginBottom: '20px', lineHeight: '1.4' }}>
-                      Wie oft werden bestimmte politische Begriffe, Länder und Trendwörter im gesamten Archiv erwähnt? Ein Klick startet direkt eine Echtzeit-Suche!
-                    </p>
-                    <div className={styles.barometerGrid}>
-                      {stats.keywordMentions.map((item, idx) => {
-                        const maxCount = Math.max(...(stats.keywordMentions || []).map(m => m.count), 1);
-                        const pct = (item.count / maxCount) * 100;
-                        return (
-                          <div
-                            key={idx}
-                            className={styles.barometerCard}
-                            onClick={() => handleWordClick(item.label)}
-                            style={{ cursor: 'pointer' }}
-                            title={`Klicken zum Suchen nach "${getCleanQuery(item.label)}"`}
-                          >
-                            <div className={styles.barometerHeader}>
-                              <span className={styles.barometerLabel}>{item.label}</span>
-                              <span className={styles.barometerCount}>{item.count}x</span>
-                            </div>
-                            <div className={styles.barometerTrack}>
-                              <div className={styles.barometerFill} style={{ width: `${pct}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+
 
                 {/* ── Das transalpine Wortgewitter (Interaktive Wortwolke) ── */}
                 {stats.keywordMentions && stats.keywordMentions.length > 0 && (
@@ -1543,33 +1512,85 @@ export default function SearchPage() {
                         );
                       })()}
 
-                      {/* Duel 2: bissel vs. bisschen */}
+                      {/* Duel 2: Kanton vs. Bundesland */}
                       {(() => {
-                        const bissel = stats.hostWordCounts.find(h => h.host.includes('Florian'))?.words.find(w => w.word === 'bissel')?.count || 0;
-                        const bisschen = stats.hostWordCounts.find(h => h.host.includes('Lenz'))?.words.find(w => w.word === 'bisschen')?.count || 0;
-                        const total = bissel + bisschen || 1;
-                        const bisselPct = (bissel / total) * 100;
-                        const bisschenPct = (bisschen / total) * 100;
+                        const kanton = stats.keywordMentions.find(m => m.label.includes('Kanton'))?.count || 0;
+                        const bundesland = stats.keywordMentions.find(m => m.label.includes('Bundesland'))?.count || 0;
+                        const total = kanton + bundesland || 1;
+                        const kantonPct = (kanton / total) * 100;
+                        const bundeslandPct = (bundesland / total) * 100;
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', fontWeight: 600 }}>
-                              <span>🇦🇹 Gasser's „bissel“ ({bissel}x)</span>
+                              <span>🇨🇭 Kanton ({kanton}x)</span>
                               <span style={{ color: 'var(--text-muted)' }}>vs.</span>
-                              <span>🇩🇪 Jacobsen's „bisschen“ ({bisschen}x)</span>
+                              <span>🇩🇪/🇦🇹 Bundesland ({bundesland}x)</span>
                             </div>
                             <div style={{ height: '24px', borderRadius: '12px', overflow: 'hidden', display: 'flex', background: 'rgba(255, 255, 255, 0.05)' }}>
-                              <div style={{ width: `${bisselPct}%`, background: '#93c5fd', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
-                                {bisselPct > 15 && `bissel ${Math.round(bisselPct)}%`}
+                              <div style={{ width: `${kantonPct}%`, background: '#6ee7b7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
+                                {kantonPct > 15 && `Kanton ${Math.round(kantonPct)}%`}
                               </div>
-                              <div style={{ width: `${bisschenPct}%`, background: '#fca5a5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
-                                {bisschenPct > 15 && `bisschen ${Math.round(bisschenPct)}%`}
+                              <div style={{ width: `${bundeslandPct}%`, background: '#fca5a5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
+                                {bundeslandPct > 15 && `Bundesland ${Math.round(bundeslandPct)}%`}
                               </div>
                             </div>
                           </div>
                         );
                       })()}
 
-                      {/* Duel 3: Bier vs. Wein vs. Kaffee */}
+                      {/* Duel 3: Matura vs. Abitur */}
+                      {(() => {
+                        const matura = stats.keywordMentions.find(m => m.label.includes('Matura'))?.count || 0;
+                        const abitur = stats.keywordMentions.find(m => m.label.includes('Abitur'))?.count || 0;
+                        const total = matura + abitur || 1;
+                        const maturaPct = (matura / total) * 100;
+                        const abiturPct = (abitur / total) * 100;
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', fontWeight: 600 }}>
+                              <span>🇦🇹/🇨🇭 Matura ({matura}x)</span>
+                              <span style={{ color: 'var(--text-muted)' }}>vs.</span>
+                              <span>🇩🇪 Abitur ({abitur}x)</span>
+                            </div>
+                            <div style={{ height: '24px', borderRadius: '12px', overflow: 'hidden', display: 'flex', background: 'rgba(255, 255, 255, 0.05)' }}>
+                              <div style={{ width: `${maturaPct}%`, background: '#93c5fd', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
+                                {maturaPct > 15 && `Matura ${Math.round(maturaPct)}%`}
+                              </div>
+                              <div style={{ width: `${abiturPct}%`, background: '#fca5a5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
+                                {abiturPct > 15 && `Abitur ${Math.round(abiturPct)}%`}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Duel 4: Spital vs. Krankenhaus */}
+                      {(() => {
+                        const spital = stats.keywordMentions.find(m => m.label.includes('Spital'))?.count || 0;
+                        const krankenhaus = stats.keywordMentions.find(m => m.label.includes('Krankenhaus'))?.count || 0;
+                        const total = spital + krankenhaus || 1;
+                        const spitalPct = (spital / total) * 100;
+                        const krankenhausPct = (krankenhaus / total) * 100;
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', fontWeight: 600 }}>
+                              <span>🇦🇹/🇨🇭 Spital ({spital}x)</span>
+                              <span style={{ color: 'var(--text-muted)' }}>vs.</span>
+                              <span>🇩🇪 Krankenhaus ({krankenhaus}x)</span>
+                            </div>
+                            <div style={{ height: '24px', borderRadius: '12px', overflow: 'hidden', display: 'flex', background: 'rgba(255, 255, 255, 0.05)' }}>
+                              <div style={{ width: `${spitalPct}%`, background: '#6ee7b7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
+                                {spitalPct > 15 && `Spital ${Math.round(spitalPct)}%`}
+                              </div>
+                              <div style={{ width: `${krankenhausPct}%`, background: '#fca5a5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
+                                {krankenhausPct > 15 && `Krankenhaus ${Math.round(krankenhausPct)}%`}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Duel 5: Bier vs. Wein vs. Kaffee */}
                       {(() => {
                         const bier = stats.keywordMentions.find(m => m.label.includes('Bier'))?.count || 0;
                         const wein = stats.keywordMentions.find(m => m.label.includes('Wein'))?.count || 0;
@@ -1600,33 +1621,7 @@ export default function SearchPage() {
                         );
                       })()}
 
-                      {/* Duel 4: Alpen 🏔️ vs. Europa 🇪🇺 */}
-                      {(() => {
-                        const alpen = stats.keywordMentions.find(m => m.label.includes('Alpen'))?.count || 0;
-                        const europa = stats.keywordMentions.find(m => m.label.includes('Europa'))?.count || 0;
-                        const total = alpen + europa || 1;
-                        const alpenPct = (alpen / total) * 100;
-                        const europaPct = (europa / total) * 100;
-                        return (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', fontWeight: 600 }}>
-                              <span>🏔️ Alpen ({alpen}x)</span>
-                              <span style={{ color: 'var(--text-muted)' }}>vs.</span>
-                              <span>🇪🇺 Europa ({europa}x)</span>
-                            </div>
-                            <div style={{ height: '24px', borderRadius: '12px', overflow: 'hidden', display: 'flex', background: 'rgba(255, 255, 255, 0.05)' }}>
-                              <div style={{ width: `${alpenPct}%`, background: '#60a5fa', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
-                                {alpenPct > 15 && `Alpen ${Math.round(alpenPct)}%`}
-                              </div>
-                              <div style={{ width: `${europaPct}%`, background: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#1a1612', transition: 'width 1s ease' }}>
-                                {europaPct > 15 && `Europa ${Math.round(europaPct)}%`}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Duel 5: Bahn 🚄 vs. Auto 🚗 */}
+                      {/* Duel 6: Bahn 🚄 vs. Auto 🚗 */}
                       {(() => {
                         const bahn = stats.keywordMentions.find(m => m.label.includes('Bahn'))?.count || 0;
                         const auto = stats.keywordMentions.find(m => m.label.includes('Auto'))?.count || 0;
@@ -1652,7 +1647,7 @@ export default function SearchPage() {
                         );
                       })()}
 
-                      {/* Duel 6: Käse 🧀 vs. Schnitzel 🥩 vs. Wurst 🌭 */}
+                      {/* Duel 7: Käse 🧀 vs. Schnitzel 🥩 vs. Wurst 🌭 */}
                       {(() => {
                         const kaese = stats.keywordMentions.find(m => m.label.includes('Käse'))?.count || 0;
                         const schnitzel = stats.keywordMentions.find(m => m.label.includes('Schnitzel'))?.count || 0;
@@ -1683,7 +1678,7 @@ export default function SearchPage() {
                         );
                       })()}
 
-                      {/* Duel 7: Deutschland 🇩🇪 vs. Österreich 🇦🇹 vs. Schweiz 🇨🇭 (Länder-Nennungen) */}
+                      {/* Duel 8: Deutschland 🇩🇪 vs. Österreich 🇦🇹 vs. Schweiz 🇨🇭 (Länder-Nennungen) */}
                       {(() => {
                         const de = stats.keywordMentions.find(m => m.label.includes('Deutschland'))?.count || 0;
                         const at = stats.keywordMentions.find(m => m.label.includes('Österreich'))?.count || 0;
@@ -1753,7 +1748,7 @@ export default function SearchPage() {
             <div className={styles.aboutHero}>
               <h2>ℹ️ Über das Projekt</h2>
               <p className={styles.aboutLead}>
-                Die transalpine Suchmaschine macht über 400 Episoden des wöchentlichen Podcasts <strong>„Servus. Grüezi. Hallo.“</strong> von ZEIT ONLINE semantisch durchsuchbar. Sie rekonstruiert Sprechanteile, spürt transalpine Sprachgewohnheiten auf und ermöglicht es, per Klick sekundengenau in die Audiospuren zu springen.
+                Die transalpine Suchmaschine macht über 400 Episoden des wöchentlichen Podcasts <strong>„Servus. Grüezi. Hallo.“</strong> von ZEIT ONLINE semantisch durchsuchbar. Sie rekonstruiert Sprechanteile, spürt Sprachgewohnheiten auf und zeigt lustige interessante statisitken.....
               </p>
             </div>
 
@@ -1762,7 +1757,7 @@ export default function SearchPage() {
               <div className={styles.aboutCard} style={{ gridColumn: '1 / -1' }}>
                 <h3 className={styles.cardTitle}>🎯 Die Vision</h3>
                 <p>
-                  Wer wöchentlich den Podcast hört, weiß, dass viele Debatten sich über Jahre hinweg ziehen: vom Föderalismus über die Energiepolitik in den Alpen bis hin zu sprachlichen Differenzen zwischen <em>bisschen</em> (Jacobsen), <em>bissel</em> (Gasser) oder dem Schweizerischen <em>Velo</em> (Daum). Doch wie findet man eine bestimmte Stelle aus Hunderten Stunden Audiomaterial wieder? Die klassische Schlagwortsuche greift oft zu kurz. Dieses Projekt löst das Problem durch eine Kombination aus moderner Spracherkennung (AI Transcription) und semantischer Vektorsuche (Semantic AI Search).
+                  Wer wöchentlich den Podcast hört, weiß, dass viele Debatten sich über Jahre hinweg ziehen: vom Föderalismus über Straches Hund bis hin zu sprachlichen Differenzen zwischen den dtei Ländern Doch wie findet man eine bestimmte Stelle aus Hunderten Stunden Audiomaterial wieder? Die klassische Schlagwortsuche greift oft zu kurz. Dieses Projekt löst das Problem durch eine Kombination aus moderner Spracherkennung (AI Transcription) und semantischer Vektorsuche (Semantic AI Search). Dann wissen die drei Podcaster auch ob FLorian Gasser erzählz hat das DOuglas Adams auf einer Wiese in Inssbruck lag beim Bier erzählt wurde oder doch shcon im podcast.
                 </p>
               </div>
 
@@ -1818,14 +1813,17 @@ export default function SearchPage() {
                 <div className={styles.bioContent}>
                   <h3>Projekt-Initiator & Entwickler</h3>
                   <p>
-                    Dieses Projekt wurde aus Liebe zum transalpinen Diskurs und moderner Webtechnologie entwickelt. Es demonstriert, wie semantische KI-Suche und automatisierte Ingestion-Pipelines genutzt werden können, um unstrukturierte Audioinhalte komfortabel durchsuchbar und wissenschaftlich sowie journalistisch auswertbar zu machen.
+                    Dieses Projekt wurde aus Spontanität beim hören des Podcasts entwickelt. Es demonstriert, wie semantische KI-Suche und automatisierte Ingestion-Pipelines genutzt werden können, um unstrukturierte Audioinhalte komfortabel durchsuchbar und wissenschaftlich sowie journalistisch auswertbar zu machen. Und ich Leo Blum hoffe das es allen Websitebesuchern gefällt.
                   </p>
                   <div className={styles.bioLinks}>
-                    <a href="https://github.com" target="_blank" rel="noopener noreferrer" className={styles.bioLink}>
+                    <a href="https://github.com/blumleo2004/transalpine-search" target="_blank" rel="noopener noreferrer" className={styles.bioLink}>
                       🐙 GitHub Repository
                     </a>
-                    <a href="https://linkedin.com" target="_blank" rel="noopener noreferrer" className={styles.bioLink}>
+                    <a href="https://www.linkedin.com/in/leo-blum-678b7a320/" target="_blank" rel="noopener noreferrer" className={styles.bioLink}>
                       💼 LinkedIn Kontakt
+                    </a>
+                    <a href="mailto:blumleo2004@gmail.com" className={styles.bioLink}>
+                      ✉️ E-Mail: blumleo2004@gmail.com
                     </a>
                   </div>
                 </div>
