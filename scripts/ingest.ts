@@ -399,6 +399,33 @@ async function main() {
     ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     : null;
 
+  // Load pre-scraped ZEIT episodes
+  const scrapedPath = path.resolve(process.cwd(), 'scripts', 'scraped_zeit_episodes.json');
+  let scrapedEpisodes: any[] = [];
+  if (fs.existsSync(scrapedPath)) {
+    try {
+      scrapedEpisodes = JSON.parse(fs.readFileSync(scrapedPath, 'utf8'));
+      console.log(`Loaded ${scrapedEpisodes.length} scraped ZEIT episodes from ${scrapedPath}`);
+    } catch (err: any) {
+      console.error(`Failed to load scraped episodes: ${err.message}`);
+    }
+  } else {
+    console.warn(`Scraped episodes file not found at ${scrapedPath}. Date matching will be limited.`);
+  }
+
+  // Helper function to clean titles for matching
+  function cleanTitle(text: string): string {
+    if (!text) return "";
+    let cleaned = text.replace(/<[^>]+>/g, '');
+    cleaned = cleaned.toLowerCase();
+    // Strip prefixes first (before removing colons)
+    cleaned = cleaned.replace(/^(alpenpodcast|jubiläum|live|live-folge|live folge|special|sonderfolge|sommerpause\s+[ivxldcm]+)\s*:?\s*/, '');
+    // Strip non-alphanumeric
+    cleaned = cleaned.replace(/[^a-z0-9äöüß\s]/g, ' ');
+    // Collapse spaces
+    return cleaned.split(/\s+/).filter(Boolean).join(' ');
+  }
+
   // Parse RSS Feed
   console.log(`Fetching RSS feed from: ${RSS_FEED_URL}...`);
   const parser = new Parser();
@@ -519,34 +546,65 @@ async function main() {
 
   for (const item of episodesToProcess) {
     const episodeId = item.guid || item.id || '';
-    const title = item.title || 'Unknown Title';
+    let title = item.title || 'Unknown Title';
     const audioUrl = item.enclosure?.url || '';
     let pubDate = item.isoDate || item.pubDate || new Date().toISOString();
     
-    // Mathematically check and correct bulk-imported episodes using their itunes:order number
-    if (item.itunes?.order) {
-      const order = parseInt(item.itunes.order);
-      if (!isNaN(order) && order > 0) {
-        const baseDate = new Date('2026-05-20T04:55:06Z');
-        const baseOrder = 404;
-        const weeksDiff = baseOrder - order;
-        const correctedDate = new Date(baseDate.getTime() - weeksDiff * 7 * 24 * 60 * 60 * 1000);
-        
-        const feedTime = new Date(pubDate).getTime();
-        const correctedTime = correctedDate.getTime();
-        const diffDays = Math.abs(feedTime - correctedTime) / (1000 * 60 * 60 * 24);
-        
-        // If the date in the feed differs by more than 14 days from the chronological weekly order,
-        // it is a bulk import artifact and we correct it.
-        if (diffDays > 14) {
-          pubDate = correctedDate.toISOString();
-          console.log(`  [Date Correction] Corrected date anomaly for "${title}" using Order ${order} -> ${pubDate} (diff: ${Math.round(diffDays)} days)`);
-        }
-      }
+    // Find matching scraped episode
+    const normTitle = cleanTitle(title);
+    let matchedEp = scrapedEpisodes.find(se => cleanTitle(se.title) === normTitle);
+
+    if (!matchedEp && normTitle) {
+      // Try substring match
+      matchedEp = scrapedEpisodes.find(se => {
+        const seNorm = cleanTitle(se.title);
+        return seNorm && (seNorm.includes(normTitle) || normTitle.includes(seNorm));
+      });
     }
 
     const durationSeconds = parseDuration(item.itunes?.duration);
-    const description = item.contentSnippet || item.content || item.summary || '';
+    let description = item.contentSnippet || item.content || item.summary || '';
+
+    // Try description matching
+    if (!matchedEp && description) {
+      const normDesc = cleanTitle(description).substring(0, 50);
+      if (normDesc) {
+        matchedEp = scrapedEpisodes.find(se => {
+          const seNormDesc = cleanTitle(se.description || '').substring(0, 50);
+          return seNormDesc && (seNormDesc.includes(normDesc) || normDesc.includes(seNormDesc));
+        });
+      }
+    }
+
+    if (matchedEp) {
+      pubDate = matchedEp.pub_date || pubDate;
+      if (matchedEp.title) {
+        title = matchedEp.title.replace("Z+ (abopflichtiger Inhalt);", "").trim();
+      }
+      if (matchedEp.description) {
+        description = matchedEp.description;
+      }
+      console.log(`  [Matched] Linked "${item.title}" to ZEIT article "${matchedEp.title}" -> Date: ${pubDate}`);
+    } else {
+      // Fallback for known unmatched items by order / title
+      if (item.itunes?.order === "384") {
+        pubDate = "2026-01-20T14:32:07.000Z";
+        console.log(`  [Manual Match] Crossover episode order 384 -> Date: ${pubDate}`);
+      } else if (item.itunes?.order === "263") {
+        pubDate = "2019-05-20T16:00:00+02:00";
+        title = "Sommerpause II: Die Ibiza-Sonderfolge";
+        description = "Die Sonderfolge zur Ibiza-Affäre in Österreich aus dem Mai 2019.";
+        console.log(`  [Manual Match] Ibiza Sonderfolge order 263 -> Date: ${pubDate}`);
+      } else if (item.itunes?.order === "310") {
+        pubDate = "2024-06-26T16:00:00+02:00";
+        title = "Geht uns nicht auf den Sender";
+        description = "Warum Schweizer einfacher ausländische Fernsehkanäle empfangen können als Deutsche und Österreicher.";
+        console.log(`  [Manual Match] Geht uns nicht auf den Sender order 310 -> Date: ${pubDate}`);
+      } else {
+        console.log(`  [Unmatched] Could not find ZEIT article for "${title}", keeping feed date: ${pubDate}`);
+      }
+    }
+
     const imageUrl = item.itunes?.image || feed.image?.url || '';
 
     if (!episodeId) {
