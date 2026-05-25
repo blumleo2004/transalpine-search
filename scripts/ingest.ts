@@ -523,22 +523,25 @@ async function main() {
     const audioUrl = item.enclosure?.url || '';
     let pubDate = item.isoDate || item.pubDate || new Date().toISOString();
     
-    // Check if it's a bulk-imported archived episode with incorrect October 7, 2025 date
-    const parsedDate = new Date(pubDate);
-    const isBulkImport = parsedDate.getUTCFullYear() === 2025 &&
-                         parsedDate.getUTCMonth() === 9 && // October is 9
-                         parsedDate.getUTCDate() === 7 &&
-                         (parsedDate.getUTCHours() === 13 || parsedDate.getUTCHours() === 14);
-                         
-    if (isBulkImport && item.itunes?.order) {
+    // Mathematically check and correct bulk-imported episodes using their itunes:order number
+    if (item.itunes?.order) {
       const order = parseInt(item.itunes.order);
       if (!isNaN(order) && order > 0) {
         const baseDate = new Date('2026-05-20T04:55:06Z');
         const baseOrder = 404;
         const weeksDiff = baseOrder - order;
         const correctedDate = new Date(baseDate.getTime() - weeksDiff * 7 * 24 * 60 * 60 * 1000);
-        pubDate = correctedDate.toISOString();
-        console.log(`  [Date Correction] Corrected bulk-imported episode date using Order ${order} -> ${pubDate}`);
+        
+        const feedTime = new Date(pubDate).getTime();
+        const correctedTime = correctedDate.getTime();
+        const diffDays = Math.abs(feedTime - correctedTime) / (1000 * 60 * 60 * 24);
+        
+        // If the date in the feed differs by more than 14 days from the chronological weekly order,
+        // it is a bulk import artifact and we correct it.
+        if (diffDays > 14) {
+          pubDate = correctedDate.toISOString();
+          console.log(`  [Date Correction] Corrected date anomaly for "${title}" using Order ${order} -> ${pubDate} (diff: ${Math.round(diffDays)} days)`);
+        }
       }
     }
 
