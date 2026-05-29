@@ -783,14 +783,12 @@ async function main() {
           embedding: c.embedding
         }));
 
-        // Insert in smaller batches of 1 with retries to avoid statement timeouts
-        const chunkBatchSize = 1;
+        // Insert in smaller batches of 50 with retries to avoid statement timeouts while keeping updates extremely fast
+        const chunkBatchSize = 50;
         for (let j = 0; j < dbChunks.length; j += chunkBatchSize) {
           const dbBatch = dbChunks.slice(j, j + chunkBatchSize);
           
-          if (j % 50 === 0) {
-            console.log(`    Ingesting chunk ${j}/${dbChunks.length}...`);
-          }
+          console.log(`    Ingesting chunks ${j} to ${Math.min(j + chunkBatchSize, dbChunks.length)} of ${dbChunks.length}...`);
           
           let retries = 3;
           let success = false;
