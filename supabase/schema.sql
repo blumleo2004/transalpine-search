@@ -68,3 +68,22 @@ as $$
   order by tc.embedding <=> query_embedding
   limit match_count;
 $$;
+
+-- Create search queries analytics table
+create table if not exists search_queries (
+  id uuid primary key default gen_random_uuid(),
+  query text not null,
+  search_type text not null, -- 'semantic' | 'exact' | 'hybrid'
+  created_at timestamp with time zone default now()
+);
+
+-- Enable RLS (Row Level Security)
+alter table search_queries enable row level security;
+
+-- Policies to allow public insert (anonymous logging) and authenticated reads
+create policy "Allow public insert to search_queries" on search_queries
+  for insert to anon, authenticated with check (true);
+
+create policy "Allow select to search_queries for authenticated" on search_queries
+  for select to authenticated using (true);
+

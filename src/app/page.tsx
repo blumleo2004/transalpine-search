@@ -330,6 +330,14 @@ export default function SearchPage() {
       const searchResults = data.results || [];
       setResults(searchResults);
       setSearchMode(data.mode || '');
+
+      // Log search query for analytics asynchronously
+      fetch('/api/log-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: searchQuery, type: currentType })
+      }).catch(err => console.error('Failed to log search:', err));
+
       return searchResults;
     } catch (e) {
       console.error(e);
