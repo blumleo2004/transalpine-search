@@ -228,6 +228,34 @@ export default function SearchPage() {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
 
+  // Admin stats state
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
+  const [adminPwInput, setAdminPwInput] = useState('');
+  const [adminQueries, setAdminQueries] = useState<any[]>([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState('');
+
+  const handleLoadAdminQueries = async (pw = adminPwInput) => {
+    if (!pw) return;
+    setAdminLoading(true);
+    setAdminError('');
+    try {
+      const res = await fetch(`/api/admin/stats?pw=${encodeURIComponent(pw)}`);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Falsches Admin-Passwort!');
+        throw new Error('Fehler beim Laden der Admin-Statistiken');
+      }
+      const data = await res.json();
+      setAdminQueries(data.queries || []);
+      setIsAdminUnlocked(true);
+    } catch (err: any) {
+      console.error(err);
+      setAdminError(err.message || 'Ladefehler');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
   // Browse state
   const [browseEpisodes, setBrowseEpisodes] = useState<BrowseEpisode[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -1806,6 +1834,103 @@ export default function SearchPage() {
                 </div>
 
                 <button className={styles.refreshBtn} onClick={loadStats}>↻ Statistiken aktualisieren</button>
+
+                {/* ── Admin Area: Search Trends ── */}
+                <div className={styles.adminSectionWrapper} style={{ marginTop: '40px', borderTop: '1px dashed rgba(255, 255, 255, 0.08)', paddingTop: '30px' }}>
+                  {!isAdminUnlocked ? (
+                    <div style={{ textAlign: 'center', padding: '20px' }}>
+                      <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                        🔒 Dieser Bereich ist nur für den Projekt-Administrator einsehbar.
+                      </p>
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', maxWidth: '320px', margin: '0 auto' }}>
+                        <input
+                          type="password"
+                          placeholder="Admin-Passwort (admin123)"
+                          value={adminPwInput}
+                          onChange={(e) => setAdminPwInput(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleLoadAdminQueries()}
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            background: 'rgba(0,0,0,0.3)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '6px',
+                            color: '#fff',
+                            fontSize: '0.85rem'
+                          }}
+                        />
+                        <button
+                          onClick={() => handleLoadAdminQueries()}
+                          className={styles.primaryButton}
+                          style={{ padding: '8px 16px', fontSize: '0.85rem', cursor: 'pointer' }}
+                        >
+                          {adminLoading ? 'Lade...' : 'Freischalten'}
+                        </button>
+                      </div>
+                      {adminError && <p style={{ color: '#ef4444', fontSize: '0.8rem', marginTop: '8px' }}>{adminError}</p>}
+                    </div>
+                  ) : (
+                    <div>
+                      <h3 className={styles.chartTitle} style={{ fontSize: '1.2rem', marginBottom: '8px' }}>⚙️ Admin-Ansicht: Beliebte Suchanfragen (Top 30)</h3>
+                      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '-4px', marginBottom: '20px', lineHeight: '1.4' }}>
+                        Diese Liste zeigt anonymisiert und nach Häufigkeit sortiert, nach welchen Begriffen deine Website-Besucher gesucht haben (aus den letzten 2000 Abfragen).
+                      </p>
+                      {adminQueries.length === 0 ? (
+                        <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', textAlign: 'center', padding: '20px', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                          Bisher wurden keine Suchanfragen protokolliert.
+                        </p>
+                      ) : (
+                        <div style={{ overflowX: 'auto', background: 'rgba(0,0,0,0.15)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)', padding: '10px' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                                <th style={{ padding: '10px' }}>Suchbegriff</th>
+                                <th style={{ padding: '10px', textAlign: 'center' }}>Häufigkeit</th>
+                                <th style={{ padding: '10px' }}>Suchmodi</th>
+                                <th style={{ padding: '10px', textAlign: 'right' }}>Zuletzt gesucht</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {adminQueries.map((item, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.03)' }}>
+                                  <td style={{ padding: '10px', fontWeight: 600, color: 'var(--accent-gold)' }}>
+                                    "{item.query}"
+                                  </td>
+                                  <td style={{ padding: '10px', textAlign: 'center' }}>
+                                    <span style={{ background: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 700 }}>
+                                      {item.count}x
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '10px', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'capitalize' }}>
+                                    {item.types.join(', ')}
+                                  </td>
+                                  <td style={{ padding: '10px', textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                    {new Date(item.last_searched).toLocaleString('de-DE')}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      <div style={{ textAlign: 'right', marginTop: '12px' }}>
+                        <button
+                          onClick={() => setIsAdminUnlocked(false)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            textDecoration: 'underline'
+                          }}
+                        >
+                          Statistiken sperren / Abmelden
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <div className={styles.emptyState}>
