@@ -35,7 +35,10 @@ using hnsw (embedding vector_cosine_ops);
 create or replace function match_chunks (
   query_embedding vector(1536),
   match_threshold float,
-  match_count int
+  match_count int,
+  filter_speakers text[] default null,
+  exclude_speakers text[] default null,
+  filter_year text default null
 )
 returns table (
   id uuid,
@@ -65,9 +68,14 @@ as $$
   from transcript_chunks tc
   join episodes e on tc.episode_id = e.id
   where 1 - (tc.embedding <=> query_embedding) > match_threshold
+    and (filter_speakers is null or tc.speaker = any(filter_speakers))
+    and (exclude_speakers is null or not (tc.speaker = any(exclude_speakers)))
+    and (filter_year is null or to_char(e.pub_date, 'YYYY') = filter_year)
   order by tc.embedding <=> query_embedding
   limit match_count;
 $$;
+
+
 
 -- Create search queries analytics table
 create table if not exists search_queries (

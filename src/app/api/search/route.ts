@@ -55,9 +55,36 @@ export async function GET(request: Request) {
       const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
       let results: any[] = [];
 
+      // Resolve speaker filters for database query
+      let dbSpeakers: string[] | null = null;
+      let dbExcludeSpeakers: string[] | null = null;
+      if (speakerFilters.length > 0) {
+        const resolved: string[] = [];
+        if (speakerFilters.includes('matthias')) resolved.push('Matthias Daum');
+        if (speakerFilters.includes('florian')) resolved.push('Florian Gasser');
+        if (speakerFilters.includes('lenz')) resolved.push('Lenz Jacobsen');
+        
+        if (speakerFilters.includes('guest')) {
+          // If guest is checked, we exclude unchecked hosts
+          const uncheckedHosts: string[] = [];
+          if (!speakerFilters.includes('matthias')) uncheckedHosts.push('Matthias Daum');
+          if (!speakerFilters.includes('florian')) uncheckedHosts.push('Florian Gasser');
+          if (!speakerFilters.includes('lenz')) uncheckedHosts.push('Lenz Jacobsen');
+          
+          if (uncheckedHosts.length > 0) {
+            dbExcludeSpeakers = uncheckedHosts;
+          }
+        } else {
+          // Just the checked hosts, no guests
+          dbSpeakers = resolved;
+        }
+      }
+
+      const filterYearParam = year !== 'all' ? year : null;
+
       // 1. EXACT SEARCH
       if (type === 'exact') {
-        const { data, error } = await supabase
+        let dbQuery = supabase
           .from('transcript_chunks')
           .select(`
             id,
@@ -66,15 +93,28 @@ export async function GET(request: Request) {
             start_time,
             end_time,
             content,
-            episodes:episode_id (
+            episodes!inner (
               title,
               audio_url,
               pub_date
             )
           `)
-          .ilike('content', `%${q}%`)
-          .limit(100);
+          .ilike('content', `%${q}%`);
 
+        // Apply filters in database
+        if (dbSpeakers) {
+          dbQuery = dbQuery.in('speaker', dbSpeakers);
+        }
+        if (dbExcludeSpeakers) {
+          dbQuery = dbQuery.not('speaker', 'in', `(${dbExcludeSpeakers.map(s => `"${s}"`).join(',')})`);
+        }
+        if (filterYearParam) {
+          const startYear = `${filterYearParam}-01-01T00:00:00Z`;
+          const endYear = `${filterYearParam}-12-31T23:59:59Z`;
+          dbQuery = dbQuery.gte('episodes.pub_date', startYear).lte('episodes.pub_date', endYear);
+        }
+
+        const { data, error } = await dbQuery.limit(100);
         if (error) throw error;
 
         if (data) {
@@ -103,37 +143,64 @@ export async function GET(request: Request) {
         });
         const embedding = embResponse.data[0].embedding;
 
-        // Fetch vector results and exact match checks in parallel
-        const [semRes, exactRes] = await Promise.all([
-          supabase.rpc('match_chunks', {
+        // Fetch vector results using RPC, with parameter-mismatch fallback
+        let semanticResults: any[] = [];
+        try {
+          // Attempt DDL-optimized RPC with filters
+          const { data, error } = await supabase.rpc('match_chunks', {
             query_embedding: embedding,
             match_threshold: 0.1,
             match_count: 50,
-          }),
-          supabase
-            .from('transcript_chunks')
-            .select(`
-              id,
-              episode_id,
-              speaker,
-              start_time,
-              end_time,
-              content,
-              episodes:episode_id (
-                title,
-                audio_url,
-                pub_date
-              )
-            `)
-            .ilike('content', `%${q}%`)
-            .limit(20)
-        ]);
+            filter_speakers: dbSpeakers,
+            exclude_speakers: dbExcludeSpeakers,
+            filter_year: filterYearParam
+          });
+          if (error) throw error;
+          semanticResults = data || [];
+        } catch (rpcErr: any) {
+          console.warn('Optimized RPC match_chunks failed, falling back to JS filtering on larger fetch:', rpcErr.message);
+          // Fallback: fetch a larger pool and post-filter in JS
+          const { data, error } = await supabase.rpc('match_chunks', {
+            query_embedding: embedding,
+            match_threshold: 0.1,
+            match_count: 1000
+          });
+          if (error) throw error;
+          
+          semanticResults = (data || []).filter((r: any) => 
+            speakerMatches(r.speaker, speakerFilters) && 
+            yearMatches(r.pub_date, year)
+          ).slice(0, 50);
+        }
 
-        if (semRes.error) throw semRes.error;
-        
-        const semanticResults = semRes.data || [];
-        const exactData = exactRes.data || [];
-        const exactResults = exactData.map((chunk: any) => ({
+        // Fetch exact match checks in parallel to boost matching chunks
+        let exactQuery = supabase
+          .from('transcript_chunks')
+          .select(`
+            id,
+            episode_id,
+            speaker,
+            start_time,
+            end_time,
+            content,
+            episodes!inner (
+              title,
+              audio_url,
+              pub_date
+            )
+          `)
+          .ilike('content', `%${q}%`);
+
+        if (dbSpeakers) exactQuery = exactQuery.in('speaker', dbSpeakers);
+        if (dbExcludeSpeakers) exactQuery = exactQuery.not('speaker', 'in', `(${dbExcludeSpeakers.map(s => `"${s}"`).join(',')})`);
+        if (filterYearParam) {
+          const startYear = `${filterYearParam}-01-01T00:00:00Z`;
+          const endYear = `${filterYearParam}-12-31T23:59:59Z`;
+          exactQuery = exactQuery.gte('episodes.pub_date', startYear).lte('episodes.pub_date', endYear);
+        }
+
+        const { data: exactData } = await exactQuery.limit(20);
+        const exactResults = (exactData || []).map((chunk: any) => ({
           id: chunk.id,
           episode_id: chunk.episode_id,
           speaker: chunk.speaker,
@@ -167,12 +234,11 @@ export async function GET(request: Request) {
       }
       // 3. HYBRID SEARCH
       else {
-        // Run both semantic and exact search, then combine
         let exactResults: any[] = [];
         let semanticResults: any[] = [];
 
-        // Exact query
-        const { data: exactData } = await supabase
+        // Exact query in DB
+        let exactQuery = supabase
           .from('transcript_chunks')
           .select(`
             id,
@@ -181,15 +247,23 @@ export async function GET(request: Request) {
             start_time,
             end_time,
             content,
-            episodes:episode_id (
+            episodes!inner (
               title,
               audio_url,
               pub_date
             )
           `)
-          .ilike('content', `%${q}%`)
-          .limit(50);
+          .ilike('content', `%${q}%`);
 
+        if (dbSpeakers) exactQuery = exactQuery.in('speaker', dbSpeakers);
+        if (dbExcludeSpeakers) exactQuery = exactQuery.not('speaker', 'in', `(${dbExcludeSpeakers.map(s => `"${s}"`).join(',')})`);
+        if (filterYearParam) {
+          const startYear = `${filterYearParam}-01-01T00:00:00Z`;
+          const endYear = `${filterYearParam}-12-31T23:59:59Z`;
+          exactQuery = exactQuery.gte('episodes.pub_date', startYear).lte('episodes.pub_date', endYear);
+        }
+
+        const { data: exactData } = await exactQuery.limit(50);
         if (exactData) {
           exactResults = exactData.map((chunk: any) => ({
             id: chunk.id,
@@ -214,12 +288,33 @@ export async function GET(request: Request) {
           });
           const embedding = embResponse.data[0].embedding;
 
-          const { data: semData } = await supabase.rpc('match_chunks', {
-            query_embedding: embedding,
-            match_threshold: 0.1,
-            match_count: 50,
-          });
-          if (semData) semanticResults = semData;
+          try {
+            // Attempt DDL-optimized RPC with filters
+            const { data, error } = await supabase.rpc('match_chunks', {
+              query_embedding: embedding,
+              match_threshold: 0.1,
+              match_count: 50,
+              filter_speakers: dbSpeakers,
+              exclude_speakers: dbExcludeSpeakers,
+              filter_year: filterYearParam
+            });
+            if (error) throw error;
+            semanticResults = data || [];
+          } catch (rpcErr: any) {
+            console.warn('Optimized RPC match_chunks failed for hybrid, falling back to JS filtering on larger fetch:', rpcErr.message);
+            // Fallback: fetch a larger pool and post-filter in JS
+            const { data, error } = await supabase.rpc('match_chunks', {
+              query_embedding: embedding,
+              match_threshold: 0.1,
+              match_count: 1000
+            });
+            if (error) throw error;
+            
+            semanticResults = (data || []).filter((r: any) => 
+              speakerMatches(r.speaker, speakerFilters) && 
+              yearMatches(r.pub_date, year)
+            ).slice(0, 50);
+          }
         }
 
         // Merge results
@@ -243,12 +338,6 @@ export async function GET(request: Request) {
 
         results = Array.from(resultMap.values());
       }
-
-      // Filter by speaker and year in JS
-      results = results.filter(r => 
-        speakerMatches(r.speaker, speakerFilters) && 
-        yearMatches(r.pub_date, year)
-      );
 
       // Sort by similarity descending
       results.sort((a, b) => b.similarity - a.similarity);

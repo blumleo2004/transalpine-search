@@ -1,9 +1,24 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const cachePath = path.resolve(process.cwd(), 'scratch', 'stats_cache.json');
+
+  // Try loading from cache
+  if (fs.existsSync(cachePath)) {
+    try {
+      console.log('Loading statistics from cache...');
+      const cachedData = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+      return NextResponse.json(cachedData);
+    } catch (err: any) {
+      console.error('Failed to read stats cache:', err.message);
+    }
+  }
+
   const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!hasSupabase) {
@@ -248,7 +263,7 @@ export async function GET() {
       }
     };
 
-    return NextResponse.json({
+    const result = {
       totalEpisodes: episodes.length,
       totalChunks: totalChunks,
       totalDurationHours: Math.round(totalDurationSeconds / 3600),
@@ -261,7 +276,21 @@ export async function GET() {
       latestEpisode: episodes[0] || null,
       oldestEpisode: episodes[episodes.length - 1] || null,
       topEpisodes,
-    });
+    };
+
+    // Save to cache
+    try {
+      const scratchDir = path.resolve(process.cwd(), 'scratch');
+      if (!fs.existsSync(scratchDir)) {
+        fs.mkdirSync(scratchDir, { recursive: true });
+      }
+      fs.writeFileSync(cachePath, JSON.stringify(result, null, 2), 'utf8');
+      console.log('Successfully saved statistics to cache.');
+    } catch (cacheErr: any) {
+      console.error('Failed to save stats to cache:', cacheErr.message);
+    }
+
+    return NextResponse.json(result);
 
   } catch (err: any) {
     console.error('Stats API error:', err.message);

@@ -827,6 +827,17 @@ async function main() {
     }
   }
 
+  // Invalidate statistics cache
+  const cachePath = path.resolve(process.cwd(), 'scratch', 'stats_cache.json');
+  if (fs.existsSync(cachePath)) {
+    try {
+      fs.unlinkSync(cachePath);
+      console.log('Invalidated statistics cache (stats_cache.json).');
+    } catch (err: any) {
+      console.error('Failed to invalidate stats cache:', err.message);
+    }
+  }
+
   console.log('\n--- INGESTION PIPELINE COMPLETED ---');
 }
 
