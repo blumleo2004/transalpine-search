@@ -1,9 +1,9 @@
-name: Weekly Podcast Ingestion
+name: Daily Podcast Ingestion & Keep-Alive
 
 on:
   schedule:
-    # Every Wednesday at 6:00 AM UTC (around when ZEIT ONLINE publishes the podcast)
-    - cron: '0 6 * * 3'
+    # Every day at 6:00 AM UTC to check for updates and keep Supabase active
+    - cron: '0 6 * * *'
   workflow_dispatch: # Allows manual run from GitHub actions UI
 
 jobs:

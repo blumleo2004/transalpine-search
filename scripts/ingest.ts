@@ -487,22 +487,45 @@ async function main() {
 
     if (supabase) {
       console.log('Checking Supabase database for existing episodes...');
-      for (const item of episodesToProcess) {
-        const episodeId = item.guid || item.id || '';
-        const durationSeconds = parseDuration(item.itunes?.duration);
-        
-        const { data: existingEpisode } = await supabase
+      try {
+        const { data: existingEps, error: fetchErr } = await supabase
           .from('episodes')
-          .select('id')
-          .eq('id', episodeId)
-          .single();
+          .select('id');
+        
+        if (fetchErr) throw fetchErr;
 
-        if (existingEpisode && !force) {
-          indexedCount++;
-        } else {
-          pendingCount++;
-          pendingSeconds += durationSeconds;
-          pendingList.push(`- ${item.title} (${Math.round(durationSeconds / 60)} min)`);
+        const existingIds = new Set((existingEps || []).map(e => e.id));
+        for (const item of episodesToProcess) {
+          const episodeId = item.guid || item.id || '';
+          const durationSeconds = parseDuration(item.itunes?.duration);
+
+          if (existingIds.has(episodeId) && !force) {
+            indexedCount++;
+          } else {
+            pendingCount++;
+            pendingSeconds += durationSeconds;
+            pendingList.push(`- ${item.title} (${Math.round(durationSeconds / 60)} min)`);
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to run optimized bulk check, falling back to sequential checks:', err.message);
+        for (const item of episodesToProcess) {
+          const episodeId = item.guid || item.id || '';
+          const durationSeconds = parseDuration(item.itunes?.duration);
+          
+          const { data: existingEpisode } = await supabase
+            .from('episodes')
+            .select('id')
+            .eq('id', episodeId)
+            .single();
+
+          if (existingEpisode && !force) {
+            indexedCount++;
+          } else {
+            pendingCount++;
+            pendingSeconds += durationSeconds;
+            pendingList.push(`- ${item.title} (${Math.round(durationSeconds / 60)} min)`);
+          }
         }
       }
     } else {
@@ -783,8 +806,8 @@ async function main() {
           embedding: c.embedding
         }));
 
-        // Insert in smaller batches of 50 with retries to avoid statement timeouts while keeping updates extremely fast
-        const chunkBatchSize = 50;
+        // Insert in smaller batches of 10 with retries to avoid statement timeouts while keeping updates extremely fast
+        const chunkBatchSize = 10;
         for (let j = 0; j < dbChunks.length; j += chunkBatchSize) {
           const dbBatch = dbChunks.slice(j, j + chunkBatchSize);
           
