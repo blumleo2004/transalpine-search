@@ -134,46 +134,39 @@ export async function GET(request: Request) {
       } 
       // 2. SEMANTIC SEARCH
       else if (type === 'semantic') {
-        if (!hasOpenAI) throw new Error('OpenAI key missing for semantic search');
-        
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const embResponse = await openai.embeddings.create({
-          model: 'text-embedding-3-small',
-          input: q,
-        });
-        const embedding = embResponse.data[0].embedding;
-
-        // Fetch vector results using RPC, with parameter-mismatch fallback
         let semanticResults: any[] = [];
-        try {
-          // Attempt DDL-optimized RPC with filters
-          const { data, error } = await supabase.rpc('match_chunks', {
-            query_embedding: embedding,
-            match_threshold: 0.1,
-            match_count: 50,
-            filter_speakers: dbSpeakers,
-            exclude_speakers: dbExcludeSpeakers,
-            filter_year: filterYearParam
-          });
-          if (error) throw error;
-          semanticResults = data || [];
-        } catch (rpcErr: any) {
-          console.warn('Optimized RPC match_chunks failed, falling back to JS filtering on larger fetch:', rpcErr.message);
-          // Fallback: fetch a larger pool and post-filter in JS
-          const { data, error } = await supabase.rpc('match_chunks', {
-            query_embedding: embedding,
-            match_threshold: 0.1,
-            match_count: 1000
-          });
-          if (error) throw error;
-          
-          semanticResults = (data || []).filter((r: any) => 
-            speakerMatches(r.speaker, speakerFilters) && 
-            yearMatches(r.pub_date, year)
-          ).slice(0, 50);
+        
+        // Try vector search if OpenAI is available
+        if (hasOpenAI) {
+          try {
+            const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+            const embResponse = await openai.embeddings.create({
+              model: 'text-embedding-3-small',
+              input: q,
+            });
+            const embedding = embResponse.data[0].embedding;
+
+            try {
+              const { data, error } = await supabase.rpc('match_chunks', {
+                query_embedding: embedding,
+                match_threshold: 0.1,
+                match_count: 50,
+                filter_speakers: dbSpeakers,
+                exclude_speakers: dbExcludeSpeakers,
+                filter_year: filterYearParam
+              });
+              if (error) throw error;
+              semanticResults = data || [];
+            } catch (rpcErr: any) {
+              console.warn('RPC match_chunks failed, falling back to exact search:', rpcErr.message);
+              // Don't rethrow — fall through to exact search below
+            }
+          } catch (embErr: any) {
+            console.warn('OpenAI embedding failed, falling back to exact search:', embErr.message);
+          }
         }
 
-        // Fetch exact match checks in parallel to boost matching chunks
+        // Always also fetch exact text matches (acts as fallback if semantic failed)
         let exactQuery = supabase
           .from('transcript_chunks')
           .select(`
@@ -199,7 +192,7 @@ export async function GET(request: Request) {
           exactQuery = exactQuery.gte('episodes.pub_date', startYear).lte('episodes.pub_date', endYear);
         }
 
-        const { data: exactData } = await exactQuery.limit(20);
+        const { data: exactData } = await exactQuery.limit(50);
         const exactResults = (exactData || []).map((chunk: any) => ({
           id: chunk.id,
           episode_id: chunk.episode_id,
@@ -210,7 +203,7 @@ export async function GET(request: Request) {
           title: chunk.episodes?.title || '',
           audio_url: chunk.episodes?.audio_url || '',
           pub_date: chunk.episodes?.pub_date || '',
-          similarity: 1.0 // Puts exact matches at the very top!
+          similarity: 1.0
         }));
 
         const resultMap = new Map<string, any>();
@@ -224,7 +217,7 @@ export async function GET(request: Request) {
         for (const item of exactResults) {
           if (resultMap.has(item.id)) {
             const existing = resultMap.get(item.id);
-            existing.similarity = 1.0; // Boost to top!
+            existing.similarity = 1.0;
           } else {
             resultMap.set(item.id, item);
           }
@@ -289,7 +282,6 @@ export async function GET(request: Request) {
           const embedding = embResponse.data[0].embedding;
 
           try {
-            // Attempt DDL-optimized RPC with filters
             const { data, error } = await supabase.rpc('match_chunks', {
               query_embedding: embedding,
               match_threshold: 0.1,
@@ -301,19 +293,8 @@ export async function GET(request: Request) {
             if (error) throw error;
             semanticResults = data || [];
           } catch (rpcErr: any) {
-            console.warn('Optimized RPC match_chunks failed for hybrid, falling back to JS filtering on larger fetch:', rpcErr.message);
-            // Fallback: fetch a larger pool and post-filter in JS
-            const { data, error } = await supabase.rpc('match_chunks', {
-              query_embedding: embedding,
-              match_threshold: 0.1,
-              match_count: 1000
-            });
-            if (error) throw error;
-            
-            semanticResults = (data || []).filter((r: any) => 
-              speakerMatches(r.speaker, speakerFilters) && 
-              yearMatches(r.pub_date, year)
-            ).slice(0, 50);
+            console.warn('RPC match_chunks failed for hybrid, continuing with exact results only:', rpcErr.message);
+            // Don't rethrow — exact results will still be returned
           }
         }
 
