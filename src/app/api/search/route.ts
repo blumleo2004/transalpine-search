@@ -344,8 +344,11 @@ export async function GET(request: Request) {
 
       return NextResponse.json({ results: results.slice(0, 50), mode: `database-${type}` });
     } catch (err: any) {
-      console.error('Database search failed, falling back to mock:', err.message);
-      // Fall through to mock search below
+      console.error('Database search failed:', err.message);
+      return NextResponse.json(
+        { error: `Database search failed: ${err.message}`, results: [], mode: 'database-error' },
+        { status: 500 }
+      );
     }
   }
 

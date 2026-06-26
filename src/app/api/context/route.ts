@@ -62,7 +62,11 @@ export async function GET(request: Request) {
         }
       }
     } catch (err: any) {
-      console.error('Failed to fetch context from database, falling back to mock:', err.message);
+      console.error('Failed to fetch context from database:', err.message);
+      return NextResponse.json(
+        { error: `Failed to fetch context: ${err.message}`, chunks: [], mode: 'database-error' },
+        { status: 500 }
+      );
     }
   }
 

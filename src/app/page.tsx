@@ -194,6 +194,7 @@ export default function SearchPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [searchMode, setSearchMode] = useState<string>('');
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [searchType, setSearchType] = useState<'semantic' | 'exact' | 'hybrid'>('semantic');
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>(['matthias', 'florian', 'lenz', 'guest']);
   const [selectedYear, setSelectedYear] = useState<string>('all');
@@ -346,6 +347,7 @@ export default function SearchPage() {
     if (!searchQuery.trim()) return [];
     setLoading(true);
     setHasSearched(true);
+    setSearchError(null);
     setExpandedEpisodes(new Set());
     setExplanations({});
     try {
@@ -353,7 +355,10 @@ export default function SearchPage() {
       const res = await fetch(
         `/api/search?q=${encodeURIComponent(searchQuery)}&type=${currentType}&speakers=${speakersParam}&year=${currentYear}`
       );
-      if (!res.ok) throw new Error('Search failed');
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Search failed');
+      }
       const data = await res.json();
       const searchResults = data.results || [];
       setResults(searchResults);
@@ -367,8 +372,9 @@ export default function SearchPage() {
       }).catch(err => console.error('Failed to log search:', err));
 
       return searchResults;
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setSearchError(e.message || 'Search failed');
       setResults([]);
       return [];
     } finally {
@@ -998,7 +1004,27 @@ export default function SearchPage() {
                 </div>
               )}
 
-              {!loading && hasSearched && results.length === 0 && (
+              {!loading && hasSearched && searchError && (
+                <div className={styles.errorState}>
+                  <div className={styles.errorStateIcon}>⚠️</div>
+                  <h3>Suche fehlgeschlagen</h3>
+                  <p className={styles.errorMessage}>{searchError}</p>
+                  {searchError.toLowerCase().includes('timeout') && (
+                    <div className={styles.errorAdvice}>
+                      <strong>Mögliche Ursache:</strong> Die Datenbank-Abfrage ist in ein Zeitlimit gelaufen. 
+                      Das liegt in der Regel daran, dass der <strong>HNSW-Index (Vektor-Index)</strong> in der Supabase-Datenbank gelöscht oder noch nicht wieder aufgebaut wurde.
+                      <br /><br />
+                      Führe bitte im Supabase SQL Editor folgenden Befehl aus, um den Index wieder aufzubauen (optimierte Parameter gegen Timeouts):
+                      <pre style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px', marginTop: '10px', fontSize: '0.85rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                        {`DROP INDEX IF EXISTS transcript_chunks_embedding_hnsw_idx;\n\nCREATE INDEX transcript_chunks_embedding_hnsw_idx \nON transcript_chunks \nUSING hnsw (embedding vector_cosine_ops)\nWITH (m = 8, ef_construction = 16);`}
+                      </pre>
+                      Dies baut den Index deutlich schneller (ca. 15–30 Sekunden) und stabil auf!
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!loading && hasSearched && !searchError && results.length === 0 && (
                 <div className={styles.emptyState}>
                   <div className={styles.emptyStateIcon}>🔍</div>
                   <h3>Keine passenden Segmente gefunden</h3>

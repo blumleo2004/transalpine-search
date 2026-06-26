@@ -241,6 +241,52 @@
   font-weight: 300;
 }
 
+.errorState {
+  text-align: center;
+  padding: 80px 20px;
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--border-radius-lg);
+  color: var(--text-secondary);
+}
+
+.errorStateIcon {
+  font-size: 3rem;
+  margin-bottom: 20px;
+  color: #ef4444;
+}
+
+.errorState h3 {
+  font-size: 1.4rem;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.errorMessage {
+  max-width: 500px;
+  margin: 0 auto 20px auto;
+  font-size: 0.95rem;
+  font-family: monospace;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 12px;
+  border-radius: 4px;
+  color: #ef4444;
+  word-break: break-all;
+}
+
+.errorAdvice {
+  max-width: 550px;
+  margin: 0 auto;
+  font-size: 0.95rem;
+  padding: 15px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--border-radius-md);
+  color: #f59e0b;
+  line-height: 1.5;
+  text-align: left;
+}
+
 /* Results Grid */
 .resultsGrid {
   display: flex;
