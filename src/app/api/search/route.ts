@@ -147,7 +147,9 @@ export async function GET(request: Request) {
             const embedding = embResponse.data[0].embedding;
 
             try {
-              const { data, error } = await supabase.rpc('match_chunks', {
+              // Use Promise.race to enforce a 3s client-side timeout
+              // so we don't blow Vercel's 10s function limit before falling back to text search
+              const rpcPromise = supabase.rpc('match_chunks', {
                 query_embedding: embedding,
                 match_threshold: 0.1,
                 match_count: 50,
@@ -155,6 +157,10 @@ export async function GET(request: Request) {
                 exclude_speakers: dbExcludeSpeakers,
                 filter_year: filterYearParam
               });
+              const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('match_chunks client timeout after 3s')), 3000)
+              );
+              const { data, error } = await Promise.race([rpcPromise, timeoutPromise]) as any;
               if (error) throw error;
               semanticResults = data || [];
             } catch (rpcErr: any) {
@@ -282,7 +288,7 @@ export async function GET(request: Request) {
           const embedding = embResponse.data[0].embedding;
 
           try {
-            const { data, error } = await supabase.rpc('match_chunks', {
+            const rpcPromise = supabase.rpc('match_chunks', {
               query_embedding: embedding,
               match_threshold: 0.1,
               match_count: 50,
@@ -290,6 +296,10 @@ export async function GET(request: Request) {
               exclude_speakers: dbExcludeSpeakers,
               filter_year: filterYearParam
             });
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('match_chunks client timeout after 3s')), 3000)
+            );
+            const { data, error } = await Promise.race([rpcPromise, timeoutPromise]) as any;
             if (error) throw error;
             semanticResults = data || [];
           } catch (rpcErr: any) {
