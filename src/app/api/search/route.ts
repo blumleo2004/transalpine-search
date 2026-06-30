@@ -158,7 +158,7 @@ export async function GET(request: Request) {
                 filter_year: filterYearParam
               });
               const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('match_chunks client timeout after 3s')), 3000)
+                setTimeout(() => reject(new Error('match_chunks client timeout after 8s')), 8000)
               );
               const { data, error } = await Promise.race([rpcPromise, timeoutPromise]) as any;
               if (error) throw error;
@@ -297,7 +297,7 @@ export async function GET(request: Request) {
               filter_year: filterYearParam
             });
             const timeoutPromise = new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('match_chunks client timeout after 3s')), 3000)
+              setTimeout(() => reject(new Error('match_chunks client timeout after 8s')), 8000)
             );
             const { data, error } = await Promise.race([rpcPromise, timeoutPromise]) as any;
             if (error) throw error;
