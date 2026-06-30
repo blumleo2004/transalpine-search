@@ -135,9 +135,9 @@ export async function GET(request: Request) {
       // 2. SEMANTIC SEARCH
       else if (type === 'semantic') {
         let semanticResults: any[] = [];
-        
-        // Try vector search if OpenAI is available
-        if (hasOpenAI) {
+
+        // Try vector search if OpenAI is available and vector search is not disabled
+        if (hasOpenAI && !process.env.DISABLE_VECTOR_SEARCH) {
           try {
             const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
             const embResponse = await openai.embeddings.create({
@@ -147,8 +147,6 @@ export async function GET(request: Request) {
             const embedding = embResponse.data[0].embedding;
 
             try {
-              // Use Promise.race to enforce a 3s client-side timeout
-              // so we don't blow Vercel's 10s function limit before falling back to text search
               const rpcPromise = supabase.rpc('match_chunks', {
                 query_embedding: embedding,
                 match_threshold: 0.1,
@@ -279,7 +277,7 @@ export async function GET(request: Request) {
         }
 
         // Semantic query
-        if (hasOpenAI) {
+        if (hasOpenAI && !process.env.DISABLE_VECTOR_SEARCH) {
           const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
           const embResponse = await openai.embeddings.create({
             model: 'text-embedding-3-small',
