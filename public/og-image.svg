@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0d0f11"/>
+  <polygon points="600,180 760,480 440,480" fill="#f5f6f0"/>
+  <polygon points="470,320 570,480 370,480" fill="#f5f6f0" opacity="0.75"/>
+  <polygon points="730,320 830,480 630,480" fill="#f5f6f0" opacity="0.75"/>
+  <polygon points="600,140 620,190 600,175 580,190" fill="#e2673a"/>
+  <text x="600" y="560" font-family="Arial, sans-serif" font-weight="800" font-size="40" fill="#f5f6f8" text-anchor="middle">Servus. Grüezi. Hallo. — Suchmaschine</text>
+</svg>

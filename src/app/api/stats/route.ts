@@ -60,20 +60,29 @@ const HOST_SIGNATURE_WORDS: Record<string, string[]> = {
   'Lenz Jacobsen': ['Deutschland', 'Berlin', 'Scholz', 'CDU', 'Ampel', 'Bundestag', 'bisschen'],
 };
 
+const YES_NO_BUT_WORDS = ['ja', 'nein', 'aber'] as const;
+
 // Postgres has a hard limit of 65535 bound params per query, and FILTER
 // clauses fired one-per-keyword still only cost a single sequential/index
 // scan of the table (vs. the ~68 separate round trips this used to take).
-function buildFilterCountsSql(conditions: { alias: string; speaker?: string; word: string }[]) {
+// wordBoundary uses regex \y (word boundary) instead of ILIKE '%word%' so
+// short words like "ja"/"nein" don't match inside longer words.
+function buildFilterCountsSql(conditions: { alias: string; speaker?: string; word: string; wordBoundary?: boolean }[]) {
   const selects: string[] = [];
   const params: any[] = [];
   let i = 1;
   for (const c of conditions) {
     if (c.speaker) {
-      selects.push(`count(*) FILTER (WHERE speaker = $${i++} AND content ILIKE $${i++}) AS "${c.alias}"`);
-      params.push(c.speaker, `%${c.word}%`);
+      const speakerIdx = i++;
+      const matchIdx = i++;
+      const matchExpr = c.wordBoundary ? `content ~* $${matchIdx}` : `content ILIKE $${matchIdx}`;
+      selects.push(`count(*) FILTER (WHERE speaker = $${speakerIdx} AND ${matchExpr}) AS "${c.alias}"`);
+      params.push(c.speaker, c.wordBoundary ? `\\y${c.word}\\y` : `%${c.word}%`);
     } else {
-      selects.push(`count(*) FILTER (WHERE content ILIKE $${i++}) AS "${c.alias}"`);
-      params.push(`%${c.word}%`);
+      const matchIdx = i++;
+      const matchExpr = c.wordBoundary ? `content ~* $${matchIdx}` : `content ILIKE $${matchIdx}`;
+      selects.push(`count(*) FILTER (WHERE ${matchExpr}) AS "${c.alias}"`);
+      params.push(c.wordBoundary ? `\\y${c.word}\\y` : `%${c.word}%`);
     }
   }
   return { sql: `SELECT ${selects.join(', ')} FROM transcript_chunks`, params };
@@ -136,6 +145,9 @@ async function computeStats() {
     { alias: 'cb__Florian Gasser__Schweiz', speaker: 'Florian Gasser', word: 'Schweiz' },
     { alias: 'cb__Lenz Jacobsen__Österreich', speaker: 'Lenz Jacobsen', word: 'Österreich' },
     { alias: 'cb__Lenz Jacobsen__Schweiz', speaker: 'Lenz Jacobsen', word: 'Schweiz' },
+    ...HOSTS.flatMap((host) =>
+      YES_NO_BUT_WORDS.map((w) => ({ alias: `ynb__${host}__${w}`, speaker: host, word: w, wordBoundary: true }))
+    ),
   ];
 
   const { sql, params } = buildFilterCountsSql(conditions);
@@ -165,6 +177,28 @@ async function computeStats() {
     },
   };
 
+  const yesNoButCounts = HOSTS.map((host) => ({
+    host,
+    ja: Number(countsRow[`ynb__${host}__ja`]) || 0,
+    nein: Number(countsRow[`ynb__${host}__nein`]) || 0,
+    aber: Number(countsRow[`ynb__${host}__aber`]) || 0,
+  }));
+
+  // Vocabulary richness needs a real GROUP BY (DISTINCT per speaker), so it
+  // can't ride along in the FILTER batch above.
+  const vocabRows = await query<{ speaker: string; distinct_words: string }>(`
+    SELECT speaker, count(DISTINCT word) AS distinct_words
+    FROM transcript_chunks,
+         unnest(regexp_split_to_array(lower(content), '[^a-zäöüßA-ZÄÖÜ]+')) AS word
+    WHERE word <> '' AND speaker = ANY($1)
+    GROUP BY speaker
+  `, [HOSTS as unknown as string[]]);
+
+  const vocabularySizes = HOSTS.map((host) => ({
+    host,
+    distinctWords: Number(vocabRows.find((r) => r.speaker === host)?.distinct_words) || 0,
+  }));
+
   return {
     totalEpisodes: episodes.length,
     totalChunks,
@@ -175,6 +209,8 @@ async function computeStats() {
     keywordMentions,
     hostWordCounts,
     crossBorderMentions,
+    yesNoButCounts,
+    vocabularySizes,
     latestEpisode: episodes[0] || null,
     oldestEpisode: episodes[episodes.length - 1] || null,
     topEpisodes,

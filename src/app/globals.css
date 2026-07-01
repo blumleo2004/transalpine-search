@@ -17,6 +17,11 @@
   --accent-green: #4f7365;
   --accent-green-rgb: 79, 115, 101;
   --accent-red: #d94e4e;
+  --accent-orange: #e2673a;
+  --accent-orange-rgb: 226, 103, 58;
+
+  --surface-elevated: #1c1f22;
+  --surface-elevated-2: #26292d;
 
   /* Missing variables used in charts/stats */
   --bg-secondary: #15181b;
