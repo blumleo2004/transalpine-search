@@ -208,11 +208,18 @@ export async function GET() {
   try {
     const result = await computeStats();
 
-    query(
-      `INSERT INTO app_cache (key, value, updated_at) VALUES ($1, $2, now())
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-      [CACHE_KEY, JSON.stringify(result)]
-    ).catch((err) => console.error('Failed to save stats cache:', err.message));
+    // Must be awaited: Vercel serverless functions can freeze the execution
+    // context as soon as the response is sent, so a fire-and-forget write
+    // here would silently never complete.
+    try {
+      await query(
+        `INSERT INTO app_cache (key, value, updated_at) VALUES ($1, $2, now())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [CACHE_KEY, JSON.stringify(result)]
+      );
+    } catch (err: any) {
+      console.error('Failed to save stats cache:', err.message);
+    }
 
     return NextResponse.json(result);
   } catch (err: any) {

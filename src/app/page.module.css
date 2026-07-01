@@ -1420,17 +1420,37 @@
 }
 
 .statCard {
-  background: #0f1215;
+  position: relative;
+  background: linear-gradient(180deg, #12161a 0%, #0f1215 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--border-radius-md);
-  padding: 28px 20px;
+  padding: 30px 20px 26px;
   text-align: center;
   transition: var(--transition-smooth);
+  overflow: hidden;
+}
+
+.statCard::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #6ee7b7, #93c5fd, #fca5a5, var(--accent-gold));
+  opacity: 0.55;
+  transition: opacity 0.25s ease;
 }
 
 .statCard:hover {
-  border-color: rgba(var(--accent-gold-rgb), 0.2);
-  background: rgba(var(--accent-gold-rgb), 0.02);
+  border-color: rgba(var(--accent-gold-rgb), 0.25);
+  background: linear-gradient(180deg, #161a1e 0%, #101316 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px -12px rgba(var(--accent-gold-rgb), 0.25);
+}
+
+.statCard:hover::before {
+  opacity: 1;
 }
 
 .statNumber {
@@ -1818,6 +1838,12 @@
   border: 1px solid var(--border-color);
   border-radius: 16px;
   padding: 24px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.chartCard:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px -18px rgba(0, 0, 0, 0.5);
 }
 
 .chartTitle {
@@ -1827,6 +1853,9 @@
   margin: 0 0 20px 0;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Donut */
