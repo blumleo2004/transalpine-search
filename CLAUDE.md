@@ -90,4 +90,6 @@ Alle Vercel-Env-Vars sind als "Sensitive" markiert → Werte können nicht per `
 - ✅ Exakt-/Hybridsuche schnell dank Trigram-Index
 - ✅ Statistiken laufen über effiziente Batch-Queries + Cache
 - ✅ Kein Vendor-Lock mehr auf einen zu schwachen Free-Tier
+- ✅ Visuelles Redesign live: eigenes Logo/Favicon, Bento-Grid-Stats-Hero, korrekte SVG-Flaggen, reduzierte Emoji-Nutzung, OG/Meta-Tags, Skeleton-Loader, ehrliche "Über dieses Projekt"-Seite (siehe `docs/superpowers/specs/2026-07-01-visual-redesign-and-stats-design.md`)
+- ✅ Neue Statistiken: Ja-/Nein-/Aber-Zähler und Wortschatz-Vielfalt pro Host
 - Offene Ideen für später: Sprecher-Mappings (`speaker_mappings`) sind aktuell leer — könnten UI-seitig befüllt werden, um "Sprecher 0/1/2"-Reste in älteren Folgen in echte Namen zu übersetzen.
