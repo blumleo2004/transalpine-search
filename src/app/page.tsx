@@ -1320,7 +1320,7 @@ export default function SearchPage() {
                     });
                     return (
                       <div className={styles.chartCard}>
-                        <h3 className={styles.chartTitle}>🎙️ Redeanteil der Hosts</h3>
+                        <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Redeanteil der Hosts</h3>
                         <div className={styles.donutWrapper}>
                           <svg width="140" height="140" viewBox="0 0 140 140">
                             {slices.map((s, i) => (
@@ -1345,7 +1345,7 @@ export default function SearchPage() {
 
                   {/* Vertical Bar Chart: Episodes per Year */}
                   <div className={styles.chartCard}>
-                    <h3 className={styles.chartTitle}>📅 Episoden nach Jahr</h3>
+                    <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Episoden nach Jahr</h3>
                     <div className={styles.barChartWrapper}>
                       {(() => {
                         const entries = Object.entries(stats.yearDistribution).sort(([a], [b]) => a.localeCompare(b));
@@ -1370,7 +1370,7 @@ export default function SearchPage() {
                 {/* ── Speaker Trend comparison Chart ── */}
                 {stats.speakerSharesByYear && (
                   <div className={styles.chartCard} style={{ marginTop: '24px' }}>
-                    <h3 className={styles.chartTitle}>📈 Sprechanteile im Jahresvergleich</h3>
+                    <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Sprechanteile im Jahresvergleich</h3>
                     <div className={styles.trendChartContainer}>
                       {Object.entries(stats.speakerSharesByYear).map(([year, shares]) => {
                         const total = Object.values(shares).reduce((a, b) => a + b, 0);
@@ -1422,10 +1422,14 @@ export default function SearchPage() {
                 {/* ── Blick über die Grenze (Länder-Erwähnungen der Hosts) ── */}
                 {stats.crossBorderMentions && (
                   <div className={styles.chartCard} style={{ marginTop: '24px' }}>
-                    <h3 className={styles.chartTitle}>👀 Blick über die Grenze</h3>
+                    <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Blick über die Grenze</h3>
                     <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '-8px', marginBottom: '20px', lineHeight: '1.4' }}>
                       Wie oft blicken die Hosts über ihre eigenen Landesgrenzen? Diese Statistik zeigt das Verhältnis der Erwähnungen der jeweiligen Nachbarländer durch die einzelnen Hosts.
                     </p>
+                    <div className={styles.inlineStatRow}>
+                      <span className={styles.inlineStatLabel}>Eigenland-Erwähnungen (Spitzenreiter):</span>
+                      <span className={styles.inlineStatValue}>{patriotismKing.value} — {patriotismKing.subtext}</span>
+                    </div>
                     <div className={styles.crossBorderGrid}>
                       {/* Matthias Daum */}
                       {(() => {
@@ -1528,10 +1532,14 @@ export default function SearchPage() {
                 {/* ── Das transalpine Wortgewitter (Interaktive Wortwolke) ── */}
                 {stats.keywordMentions && stats.keywordMentions.length > 0 && (
                   <div className={styles.chartCard} style={{ marginTop: '24px' }}>
-                    <h3 className={styles.chartTitle}>☁️ Das transalpine Wortgewitter</h3>
+                    <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Das transalpine Wortgewitter</h3>
                     <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '-8px', marginBottom: '20px', lineHeight: '1.4' }}>
                       Die meistdiskutierten Begriffe im gesamten Podcast-Archiv. Die Schriftgröße zeigt die Häufigkeit der Nennung. Ein Klick startet direkt eine Echtzeit-Suche!
                     </p>
+                    <div className={styles.inlineStatRow}>
+                      <span className={styles.inlineStatLabel}>Meistgenanntes Getränk:</span>
+                      <span className={styles.inlineStatValue}>{favDrink.value} — {favDrink.subtext}</span>
+                    </div>
                     <div className={styles.wordCloudWrapper}>
                       {stableShuffle(stats.keywordMentions, 'servus-gruezi-hallo-wordcloud').map((item, idx) => {
                         const counts = (stats.keywordMentions || []).map(m => m.count);
@@ -1586,7 +1594,7 @@ export default function SearchPage() {
                 {/* ── Typische Wörter der Hosts (Vokabular-Vergleich) ── */}
                 {stats.hostWordCounts && stats.hostWordCounts.length > 0 && (
                   <div className={styles.chartCard} style={{ marginTop: '24px' }}>
-                    <h3 className={styles.chartTitle}>🗣️ Typische Wörter der Hosts</h3>
+                    <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Typische Wörter der Hosts</h3>
                     <div className={styles.hostWordsColumns}>
                       {stats.hostWordCounts.map((group, idx) => {
                         // Determine host specific styles and details
@@ -1655,7 +1663,7 @@ export default function SearchPage() {
                 {/* ── Transalpine Duelle ── */}
                 {stats.keywordMentions && stats.hostWordCounts && (
                   <div className={styles.chartCard} style={{ marginTop: '24px' }}>
-                    <h3 className={styles.chartTitle}>🥊 Transalpine Sprach- & Kulturduelle</h3>
+                    <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Transalpine Sprach- & Kulturduelle</h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                       
                       {/* Duel 1: Velo vs. Fahrrad */}
@@ -1881,6 +1889,46 @@ export default function SearchPage() {
                         );
                       })()}
 
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Ja, Nein & Aber ── */}
+                {stats.yesNoButCounts && stats.yesNoButCounts.length > 0 && (
+                  <div className={styles.chartCard} style={{ marginTop: '24px' }}>
+                    <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Ja, Nein & Aber</h3>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '-8px', marginBottom: '20px', lineHeight: '1.4' }}>
+                      Wer stimmt am häufigsten zu, wer widerspricht am meisten, und wer relativiert am liebsten mit einem "aber"?
+                    </p>
+                    <div className={styles.hostWordsColumns}>
+                      {stats.yesNoButCounts.map((row) => {
+                        const flag: 'CH' | 'AT' | 'DE' =
+                          row.host === 'Matthias Daum' ? 'CH' : row.host === 'Florian Gasser' ? 'AT' : 'DE';
+                        const maxVal = Math.max(row.ja, row.nein, row.aber, 1);
+                        return (
+                          <div key={row.host} className={styles.hostWordsCol}>
+                            <div className={styles.hostWordsHeader}>
+                              <div className={styles.hostAvatar}><CountryFlag country={flag} size={18} /></div>
+                              <div className={styles.hostMeta}>
+                                <span className={styles.hostName}>{row.host}</span>
+                              </div>
+                            </div>
+                            <div className={styles.hostWordsList}>
+                              {([['Ja', row.ja], ['Nein', row.nein], ['Aber', row.aber]] as [string, number][]).map(([label, count]) => (
+                                <div key={label} className={styles.hostWordItem}>
+                                  <div className={styles.hostWordTextRow}>
+                                    <span className={styles.hostWordLabel}>{label}</span>
+                                    <span className={styles.hostWordCount}>{count}x</span>
+                                  </div>
+                                  <div className={styles.hostWordTrack}>
+                                    <div className={styles.hostWordFill} style={{ width: `${(count / maxVal) * 100}%` }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

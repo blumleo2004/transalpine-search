@@ -1981,6 +1981,33 @@
   gap: 8px;
 }
 
+.chartTitleBar {
+  display: inline-block;
+  width: 3px;
+  height: 14px;
+  background: var(--accent-orange);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.inlineStatRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.85rem;
+  margin: -8px 0 18px 0;
+  flex-wrap: wrap;
+}
+
+.inlineStatLabel {
+  color: var(--text-muted);
+}
+
+.inlineStatValue {
+  color: var(--accent-gold);
+  font-weight: 700;
+}
+
 /* Donut */
 .donutWrapper {
   display: flex;
