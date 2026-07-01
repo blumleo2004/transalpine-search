@@ -1419,6 +1419,129 @@
   margin-bottom: 40px;
 }
 
+.heroWatermarkWrap {
+  position: relative;
+}
+
+.heroWatermark {
+  position: absolute;
+  top: -20px;
+  left: 0;
+  right: 0;
+  height: 140px;
+  color: var(--text-primary);
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.bentoHero {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  grid-template-rows: auto auto;
+  gap: 12px;
+  margin-bottom: 40px;
+}
+
+.bentoFeature {
+  grid-row: span 2;
+  background: linear-gradient(155deg, var(--surface-elevated) 0%, #181b1e 100%);
+  border: 1px solid rgba(var(--accent-orange-rgb), 0.25);
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 0 40px -12px rgba(var(--accent-orange-rgb), 0.15);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.bentoFeatureLabel {
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-orange);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.bentoFeatureNumber {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  font-size: 2.6rem;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.bentoFeatureSub {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin-top: 8px;
+}
+
+.bentoFeatureFooter {
+  display: flex;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bentoFooterNumber {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.bentoFooterLabel {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.bentoTile {
+  background: var(--surface-elevated);
+  border-radius: 14px;
+  padding: 18px;
+  transition: var(--transition-smooth);
+}
+
+.bentoTile:hover {
+  background: var(--surface-elevated-2);
+}
+
+.bentoTileHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+.bentoTileNumber {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  color: var(--text-primary);
+  font-size: 1.6rem;
+}
+
+.bentoTileLabel {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+  .bentoHero {
+    grid-template-columns: 1fr 1fr;
+  }
+  .bentoFeature {
+    grid-column: span 2;
+    grid-row: auto;
+  }
+}
+
 .statCard {
   position: relative;
   background: linear-gradient(180deg, #12161a 0%, #0f1215 100%);

@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import styles from './page.module.css';
+import Logo from '@/components/Logo';
+import CountryFlag from '@/components/CountryFlag';
 
 // ──────────────────────── Types ────────────────────────
 
@@ -47,6 +49,8 @@ interface StatsData {
   keywordMentions?: { label: string; count: number }[];
   hostWordCounts?: { host: string; words: { word: string; count: number }[] }[];
   crossBorderMentions?: Record<string, Record<string, number>>;
+  yesNoButCounts?: { host: string; ja: number; nein: number; aber: number }[];
+  vocabularySizes?: { host: string; distinctWords: number }[];
   topEpisodes: { id: string; title: string; chunkCount: number }[];
   latestEpisode: { title: string; pub_date: string } | null;
   oldestEpisode: { title: string; pub_date: string } | null;
@@ -788,7 +792,10 @@ export default function SearchPage() {
     <div className={styles.container}>
       <header className={styles.header}>
         <div className={styles.logoBadge}>DIE TRANSALPINE KI-SUCHE</div>
-        <h1 className={styles.title}>Servus. Grüezi. Hallo.</h1>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+          <Logo size={36} />
+          <h1 className={styles.title}>Servus. Grüezi. Hallo.</h1>
+        </div>
         <p className={styles.subtitle}>
           Die semantische Suchmaschine für den wöchentlichen transalpinen Podcast von ZEIT ONLINE.
           Finde Themen, Transkripte und Audio-Mitschritte sofort.
@@ -1226,24 +1233,61 @@ export default function SearchPage() {
             ) : stats ? (
               <>
                 {/* ── Hero KPI Cards ── */}
-                <div className={styles.statsGrid}>
-                  <div className={styles.statCard}>
-                    <div className={styles.statNumber}>{stats.totalEpisodes}</div>
-                    <div className={styles.statLabel}>Episoden indiziert</div>
-                  </div>
-                  <div className={styles.statCard}>
-                    <div className={styles.statNumber} style={{ fontSize: '1.5rem' }}>{patriotismKing.value}</div>
-                    <div className={styles.statLabel}>Patriotismus-König (Eigenland-Nennungen)</div>
-                    <div className={styles.statSubtext} style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '4px' }}>{patriotismKing.subtext}</div>
-                  </div>
-                  <div className={styles.statCard}>
-                    <div className={styles.statNumber}>{stats.totalDurationHours > 0 ? `${stats.totalDurationHours}h` : '~150h'}</div>
-                    <div className={styles.statLabel}>Audiomaterial</div>
-                  </div>
-                  <div className={styles.statCard}>
-                    <div className={styles.statNumber} style={{ fontSize: '1.8rem' }}>{favDrink.value}</div>
-                    <div className={styles.statLabel}>Flüssiges Gold (Getränk)</div>
-                    <div className={styles.statSubtext} style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '4px' }}>{favDrink.subtext}</div>
+                <div className={styles.heroWatermarkWrap}>
+                  <svg className={styles.heroWatermark} viewBox="0 0 800 200" preserveAspectRatio="none">
+                    <polygon points="0,200 100,60 180,140 260,20 340,110 420,50 500,150 580,70 660,130 740,40 800,90 800,200" fill="currentColor" />
+                  </svg>
+                  <div className={styles.bentoHero}>
+                    <div className={styles.bentoFeature}>
+                      <div className={styles.bentoFeatureLabel}>Archiv-Umfang</div>
+                      <div className={styles.bentoFeatureNumber}>{stats.totalChunks.toLocaleString('de-DE')}</div>
+                      <div className={styles.bentoFeatureSub}>Gesprächsfetzen aus {stats.totalEpisodes} Episoden</div>
+                      <div className={styles.bentoFeatureFooter}>
+                        <div>
+                          <div className={styles.bentoFooterNumber}>{stats.totalDurationHours}h</div>
+                          <div className={styles.bentoFooterLabel}>Audio</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={styles.bentoTile}>
+                      <div className={styles.bentoTileNumber}>{stats.totalEpisodes}</div>
+                      <div className={styles.bentoTileLabel}>Episoden</div>
+                    </div>
+
+                    <div className={styles.bentoTile}>
+                      <div className={styles.bentoTileNumber}>{stats.totalDurationHours}h</div>
+                      <div className={styles.bentoTileLabel}>Audiomaterial</div>
+                    </div>
+
+                    {(() => {
+                      const shares = Object.entries(stats.speakerDistribution || {}).filter(([n]) => n !== 'Gäste & Sonstige');
+                      const total = shares.reduce((s, [, v]) => s + v, 0) || 1;
+                      const leader = shares.sort((a, b) => b[1] - a[1])[0];
+                      const flagFor = (name: string): 'CH' | 'AT' | 'DE' =>
+                        name === 'Matthias Daum' ? 'CH' : name === 'Florian Gasser' ? 'AT' : 'DE';
+                      if (!leader) return null;
+                      return (
+                        <div className={styles.bentoTile}>
+                          <div className={styles.bentoTileHeader}>
+                            <CountryFlag country={flagFor(leader[0])} size={16} />
+                            <div className={styles.bentoTileNumber} style={{ fontSize: '1.1rem' }}>{leader[0].split(' ')[0]}</div>
+                          </div>
+                          <div className={styles.bentoTileLabel}>Redeanteil-Sieger ({Math.round((leader[1] / total) * 100)}%)</div>
+                        </div>
+                      );
+                    })()}
+
+                    {(() => {
+                      const vocab = (stats.vocabularySizes || []).slice().sort((a, b) => b.distinctWords - a.distinctWords)[0];
+                      if (!vocab) return null;
+                      return (
+                        <div className={styles.bentoTile}>
+                          <div className={styles.bentoTileNumber} style={{ fontSize: '1.1rem' }}>{vocab.host.split(' ')[0]}</div>
+                          <div className={styles.bentoTileLabel}>Wortschatz-Sieger ({vocab.distinctWords.toLocaleString('de-DE')} Wörter)</div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
