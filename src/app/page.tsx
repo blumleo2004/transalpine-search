@@ -2052,89 +2052,36 @@ export default function SearchPage() {
 
         {/* ════════════ ABOUT TAB ════════════ */}
         {activeTab === 'about' && (
-          <section className={styles.aboutSection}>
-            <div className={styles.aboutHero}>
-              <h2>ℹ️ Über das Projekt</h2>
-              <p className={styles.aboutLead}>
-                Die transalpine Suchmaschine macht über 400 Episoden des wöchentlichen Podcasts <strong>„Servus. Grüezi. Hallo.“</strong> von ZEIT ONLINE semantisch durchsuchbar. Sie rekonstruiert Sprechanteile, spürt Sprachgewohnheiten auf und zeigt lustige interessante statisitken.....
-              </p>
-            </div>
-
-            <div className={styles.aboutGrid}>
-              {/* Vision Card */}
-              <div className={styles.aboutCard} style={{ gridColumn: '1 / -1' }}>
-                <h3 className={styles.cardTitle}>🎯 Die Vision</h3>
+          <section className={styles.statsSection}>
+            <div className={styles.chartCard}>
+              <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Über dieses Projekt</h3>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: '1.7', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <p>
-                  Wer wöchentlich den Podcast hört, weiß, dass viele Debatten sich über Jahre hinweg ziehen: vom Föderalismus über Straches Hund bis hin zu sprachlichen Differenzen zwischen den dtei Ländern Doch wie findet man eine bestimmte Stelle aus Hunderten Stunden Audiomaterial wieder? Die klassische Schlagwortsuche greift oft zu kurz. Dieses Projekt löst das Problem durch eine Kombination aus moderner Spracherkennung (AI Transcription) und semantischer Vektorsuche (Semantic AI Search). Dann wissen die drei Podcaster auch ob FLorian Gasser erzählz hat das DOuglas Adams auf einer Wiese in Inssbruck lag beim Bier erzählt wurde oder doch shcon im podcast.
+                  Das hier ist ein privates Hobbyprojekt — keine offizielle Seite von ZEIT ONLINE oder den Podcast-Machern.
+                  Es durchsucht das komplette Archiv von <strong>„Servus. Grüezi. Hallo.“</strong>, dem transalpinen Politikpodcast
+                  von Matthias Daum, Florian Gasser und Lenz Jacobsen.
                 </p>
-              </div>
-
-              {/* Ingestion Card */}
-              <div className={styles.aboutCard}>
-                <div className={styles.cardIcon}>📡</div>
-                <h3 className={styles.cardTitle}>1. Podcast-Ingestion</h3>
                 <p>
-                  Ein Scheduler parsed den offiziellen RSS-Feed des Podcasts und identifiziert neue Episoden. Die Audiodaten werden direkt von den Simplecast-Servern bezogen und für die Weiterverarbeitung vorbereitet.
+                  <strong>Wie es funktioniert:</strong> Jede Folge wird automatisch transkribiert (Deepgram), in Gesprächsabschnitte
+                  zerlegt und wer spricht per KI-Heuristik geschätzt. Für die Sinnsuche wird jeder Abschnitt in einen Vektor
+                  (OpenAI-Embedding) umgewandelt; deine Suchanfrage wird genauso umgewandelt und die ähnlichsten Abschnitte
+                  werden gefunden — daher funktioniert die Suche auch, wenn du nicht die exakten Wörter aus der Folge triffst.
                 </p>
-              </div>
-
-              {/* Transcription Card */}
-              <div className={styles.aboutCard}>
-                <div className={styles.cardIcon}>🎙️</div>
-                <h3 className={styles.cardTitle}>2. Spracherkennung & Diarization</h3>
                 <p>
-                  Die Audiospur wird mit dem modernsten Deepgram Nova-2 Modell transkribiert. Mittels Diarization (Sprecherunterscheidung) werden die Stimmen von Matthias Daum, Florian Gasser, Lenz Jacobsen und etwaigen Gästen erkannt und auf Wortebene mit Millisekunden-Timecodes versehen.
+                  <strong>Ein paar ehrliche Einschränkungen:</strong> Die automatische Sprechererkennung ist nicht perfekt —
+                  gelegentlich wird ein Satz dem falschen Host zugeordnet, besonders bei schnellen Wortwechseln. Datumsangaben
+                  bei älteren Folgen beruhen teils auf Bestmatch-Vergleichen mit Artikeltiteln und können leicht daneben liegen.
+                  Die Statistiken auf der Stats-Seite sind zum Spaß gedacht, nicht als wissenschaftliche Auswertung.
                 </p>
-              </div>
-
-              {/* Correction Card */}
-              <div className={styles.aboutCard}>
-                <div className={styles.cardIcon}>🛠️</div>
-                <h3 className={styles.cardTitle}>3. KI-Sprecherkorrektur</h3>
-                <p>
-                  Da Sprecherunterscheidungsmodelle bei Stimmüberlappungen oder Lachen Fehler machen, validiert und korrigiert ein nachgeschaltetes GPT-Modell (GPT-4o-mini) die Sprecherzuordnung anhand von Kontextregeln, typischen Redewendungen und den charakteristischen Stimmmustern.
+                <p style={{ marginTop: '6px' }}>
+                  <a href="https://github.com/blumleo2004/transalpine-search" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-gold)' }}>
+                    GitHub Repository
+                  </a>
+                  {' · '}
+                  <a href="mailto:blumleo2004@gmail.com" style={{ color: 'var(--accent-gold)' }}>
+                    blumleo2004@gmail.com
+                  </a>
                 </p>
-              </div>
-
-              {/* Vector Search Card */}
-              <div className={styles.aboutCard}>
-                <div className={styles.cardIcon}>⚡</div>
-                <h3 className={styles.cardTitle}>4. Embedding & Vektor-Suche</h3>
-                <p>
-                  Die korrigierten Transkripte werden in inhaltliche Segmente zerlegt. Für jedes Segment wird über die OpenAI API ein hochdimensionaler Vektor (Embedding: <code>text-embedding-3-small</code>) berechnet. Diese Vektoren werden in einer Supabase PostgreSQL-Datenbank mit <code>pgvector</code> und HNSW-Indexierung gespeichert. Die Suche vergleicht Ihre Suchanfrage semantisch (Kosinus-Ähnlichkeit) mit allen Abschnitten.
-                </p>
-              </div>
-
-              {/* Autopilot Card */}
-              <div className={styles.aboutCard} style={{ gridColumn: '1 / -1' }}>
-                <h3 className={styles.cardTitle}>🤖 Vollautomatische Aktualisierung</h3>
-                <p>
-                  Die Suchmaschine pflegt sich komplett selbst. Jeden Mittwochmorgen wird ein automatisierter GitHub-Actions-Workflow gestartet. Dieser zieht die neueste Podcast-Episode, führt die Transkription, Korrektur, Vektorberechnung und Datenbank-Ingestion aus, sodass die Suchmaschine stets auf dem aktuellsten Stand ist.
-                </p>
-              </div>
-            </div>
-
-            {/* Developer Bio Card */}
-            <div className={styles.bioSection}>
-              <div className={styles.bioCard}>
-                <div className={styles.bioAvatar}>💻</div>
-                <div className={styles.bioContent}>
-                  <h3>Projekt-Initiator & Entwickler</h3>
-                  <p>
-                    Dieses Projekt wurde aus Spontanität beim hören des Podcasts entwickelt. Es demonstriert, wie semantische KI-Suche und automatisierte Ingestion-Pipelines genutzt werden können, um unstrukturierte Audioinhalte komfortabel durchsuchbar und wissenschaftlich sowie journalistisch auswertbar zu machen. Und ich Leo Blum hoffe das es allen Websitebesuchern gefällt.
-                  </p>
-                  <div className={styles.bioLinks}>
-                    <a href="https://github.com/blumleo2004/transalpine-search" target="_blank" rel="noopener noreferrer" className={styles.bioLink}>
-                      🐙 GitHub Repository
-                    </a>
-                    <a href="https://www.linkedin.com/in/leo-blum-678b7a320/" target="_blank" rel="noopener noreferrer" className={styles.bioLink}>
-                      💼 LinkedIn Kontakt
-                    </a>
-                    <a href="mailto:blumleo2004@gmail.com" className={styles.bioLink}>
-                      ✉️ E-Mail: blumleo2004@gmail.com
-                    </a>
-                  </div>
-                </div>
               </div>
             </div>
           </section>
