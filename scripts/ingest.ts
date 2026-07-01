@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { query } from '../src/lib/db';
 import Parser from 'rss-parser';
 import { OpenAI } from 'openai';
 import * as dotenv from 'dotenv';
@@ -380,22 +380,17 @@ async function main() {
   console.log(`Pre-Scan / Dry Run: ${preScan}`);
 
   // Check API keys
-  const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const hasDb = !!process.env.DATABASE_URL;
   const hasDeepgram = !!process.env.DEEPGRAM_API_KEY;
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
 
   console.log('\n--- ENVIRONMENT CHECK ---');
-  console.log(`Supabase Configured: ${hasSupabase ? 'YES' : 'NO (Mock mode for database)'}`);
+  console.log(`Database Configured: ${hasDb ? 'YES' : 'NO (Mock mode for database)'}`);
   console.log(`Deepgram API Key: ${hasDeepgram ? 'YES' : 'NO (Generating mock transcripts)'}`);
   console.log(`OpenAI API Key: ${hasOpenAI ? 'YES' : 'NO (Generating mock vector embeddings)'}`);
   console.log('-------------------------\n');
 
-  // Initialize clients
-  const supabase = hasSupabase 
-    ? createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-    : null;
-    
-  const openai = hasOpenAI 
+  const openai = hasOpenAI
     ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     : null;
 
@@ -449,14 +444,11 @@ async function main() {
   }
 
   // If not force mode, filter out episodes that are already in the database
-  if (supabase && !force && !targetEpisodeId) {
-    console.log('Querying Supabase to filter out already indexed episodes...');
+  if (hasDb && !force && !targetEpisodeId) {
+    console.log('Querying database to filter out already indexed episodes...');
     try {
-      const { data: existingEps, error: fetchErr } = await supabase
-        .from('episodes')
-        .select('id');
-      if (fetchErr) throw fetchErr;
-      const existingIds = new Set((existingEps || []).map(e => e.id));
+      const existingEps = await query<{ id: string }>('SELECT id FROM episodes');
+      const existingIds = new Set(existingEps.map(e => e.id));
       const beforeCount = episodesToProcess.length;
       episodesToProcess = episodesToProcess.filter(item => {
         const episodeId = item.guid || item.id || '';
@@ -485,16 +477,11 @@ async function main() {
     let pendingSeconds = 0;
     const pendingList: string[] = [];
 
-    if (supabase) {
-      console.log('Checking Supabase database for existing episodes...');
+    if (hasDb) {
+      console.log('Checking database for existing episodes...');
       try {
-        const { data: existingEps, error: fetchErr } = await supabase
-          .from('episodes')
-          .select('id');
-        
-        if (fetchErr) throw fetchErr;
-
-        const existingIds = new Set((existingEps || []).map(e => e.id));
+        const existingEps = await query<{ id: string }>('SELECT id FROM episodes');
+        const existingIds = new Set(existingEps.map(e => e.id));
         for (const item of episodesToProcess) {
           const episodeId = item.guid || item.id || '';
           const durationSeconds = parseDuration(item.itunes?.duration);
@@ -508,25 +495,7 @@ async function main() {
           }
         }
       } catch (err: any) {
-        console.error('Failed to run optimized bulk check, falling back to sequential checks:', err.message);
-        for (const item of episodesToProcess) {
-          const episodeId = item.guid || item.id || '';
-          const durationSeconds = parseDuration(item.itunes?.duration);
-          
-          const { data: existingEpisode } = await supabase
-            .from('episodes')
-            .select('id')
-            .eq('id', episodeId)
-            .single();
-
-          if (existingEpisode && !force) {
-            indexedCount++;
-          } else {
-            pendingCount++;
-            pendingSeconds += durationSeconds;
-            pendingList.push(`- ${item.title} (${Math.round(durationSeconds / 60)} min)`);
-          }
-        }
+        console.error('Failed to check existing episodes:', err.message);
       }
     } else {
       console.log('No database connected, listing all episodes as pending.');
@@ -643,14 +612,9 @@ async function main() {
     console.log(`=== Processing: "${title}" (ID: ${episodeId}) ===`);
 
     // Check if already processed in database
-    if (supabase && !force) {
-      const { data: existingEpisode } = await supabase
-        .from('episodes')
-        .select('id')
-        .eq('id', episodeId)
-        .single();
-
-      if (existingEpisode) {
+    if (hasDb && !force) {
+      const existingEpisode = await query<{ id: string }>('SELECT id FROM episodes WHERE id = $1', [episodeId]);
+      if (existingEpisode.length > 0) {
         console.log(`Episode already exists in database. Skipping. (Use --force to re-process)`);
         continue;
       }
@@ -731,7 +695,7 @@ async function main() {
       await correctMergedSpeakers(chunks, openai);
     }
 
-    // Step 3: Vektorization & Supabase Insertions
+    // Step 3: Vectorization & Database Insertions
     console.log(`Vectorizing chunks...`);
     const processedChunks = [];
     
@@ -748,17 +712,18 @@ async function main() {
             const embResponse = await openai.embeddings.create({
               model: 'text-embedding-3-small',
               input: chunk.content,
+              dimensions: 512,
               encoding_format: 'float'
             });
             embedding = embResponse.data[0].embedding;
           } catch (err: any) {
             console.error(`  Embedding generation failed for chunk: "${chunk.content.substring(0, 30)}...":`, err.message);
             // Fallback to mock embedding on error
-            embedding = Array.from({ length: 1536 }, () => (Math.random() - 0.5) * 0.1);
+            embedding = Array.from({ length: 512 }, () => (Math.random() - 0.5) * 0.1);
           }
         } else {
           // Mock embedding
-          embedding = Array.from({ length: 1536 }, () => (Math.random() - 0.5) * 0.1);
+          embedding = Array.from({ length: 512 }, () => (Math.random() - 0.5) * 0.1);
         }
         return {
           ...chunk,
@@ -771,75 +736,65 @@ async function main() {
     }
 
     // Step 4: Write to DB or write to mock local file
-    if (supabase) {
-      console.log('Writing episode and chunks to Supabase...');
+    if (hasDb) {
+      console.log('Writing episode and chunks to database...');
       try {
         // Upsert episode
-        const { error: epError } = await supabase
-          .from('episodes')
-          .upsert({
-            id: episodeId,
-            title,
-            pub_date: pubDate,
-            audio_url: audioUrl,
-            image_url: imageUrl,
-            description,
-            duration: durationSeconds
-          });
-
-        if (epError) throw epError;
+        await query(
+          `INSERT INTO episodes (id, title, pub_date, audio_url, image_url, description, duration)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, pub_date=EXCLUDED.pub_date,
+             audio_url=EXCLUDED.audio_url, image_url=EXCLUDED.image_url,
+             description=EXCLUDED.description, duration=EXCLUDED.duration`,
+          [episodeId, title, pubDate, audioUrl, imageUrl, description, durationSeconds]
+        );
 
         // Insert chunks (delete existing if force updating)
         if (force) {
-          await supabase
-            .from('transcript_chunks')
-            .delete()
-            .eq('episode_id', episodeId);
+          await query('DELETE FROM transcript_chunks WHERE episode_id = $1', [episodeId]);
         }
-
-        const dbChunks = processedChunks.map(c => ({
-          episode_id: episodeId,
-          speaker: c.speaker,
-          start_time: c.start_time,
-          end_time: c.end_time,
-          content: c.content,
-          embedding: c.embedding
-        }));
 
         // Insert in smaller batches of 10 with retries to avoid statement timeouts while keeping updates extremely fast
         const chunkBatchSize = 10;
-        for (let j = 0; j < dbChunks.length; j += chunkBatchSize) {
-          const dbBatch = dbChunks.slice(j, j + chunkBatchSize);
-          
-          console.log(`    Ingesting chunks ${j} to ${Math.min(j + chunkBatchSize, dbChunks.length)} of ${dbChunks.length}...`);
-          
+        for (let j = 0; j < processedChunks.length; j += chunkBatchSize) {
+          const dbBatch = processedChunks.slice(j, j + chunkBatchSize);
+
+          console.log(`    Ingesting chunks ${j} to ${Math.min(j + chunkBatchSize, processedChunks.length)} of ${processedChunks.length}...`);
+
           let retries = 3;
           let success = false;
           while (retries > 0 && !success) {
-            const { error: chunkError } = await supabase
-              .from('transcript_chunks')
-              .insert(dbBatch);
-            
-            if (!chunkError) {
+            try {
+              const values: string[] = [];
+              const params: any[] = [];
+              dbBatch.forEach((c, i) => {
+                const base = i * 6;
+                values.push(`($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6}::vector)`);
+                params.push(episodeId, c.speaker, c.start_time, c.end_time, c.content, `[${c.embedding.join(',')}]`);
+              });
+              await query(
+                `INSERT INTO transcript_chunks (episode_id, speaker, start_time, end_time, content, embedding) VALUES ${values.join(',')}`,
+                params
+              );
               success = true;
-            } else {
+            } catch (chunkError: any) {
               retries--;
               console.error(`    Insert failed at chunk ${j}: ${chunkError.message}. Retrying in 1.5s... (${retries} retries left)`);
               if (retries === 0) throw chunkError;
               await new Promise(resolve => setTimeout(resolve, 1500));
             }
           }
-          
+
           // Tiny delay between batches to keep the database stable
           await new Promise(resolve => setTimeout(resolve, 50));
         }
 
-        console.log(`Successfully ingested episode "${title}" and its ${dbChunks.length} chunks into Supabase!`);
+        console.log(`Successfully ingested episode "${title}" and its ${processedChunks.length} chunks!`);
       } catch (err: any) {
-        console.error('Failed to write to Supabase:', err.message);
+        console.error('Failed to write to database:', err.message);
         try {
-          console.log(`Rollback: Deleting empty/incomplete episode "${title}" (ID: ${episodeId}) from Supabase...`);
-          await supabase.from('episodes').delete().eq('id', episodeId);
+          console.log(`Rollback: Deleting empty/incomplete episode "${title}" (ID: ${episodeId})...`);
+          await query('DELETE FROM episodes WHERE id = $1', [episodeId]);
         } catch (rollbackErr: any) {
           console.error('Rollback failed:', rollbackErr.message);
         }
@@ -851,11 +806,10 @@ async function main() {
   }
 
   // Invalidate statistics cache
-  const cachePath = path.resolve(process.cwd(), 'scratch', 'stats_cache.json');
-  if (fs.existsSync(cachePath)) {
+  if (hasDb) {
     try {
-      fs.unlinkSync(cachePath);
-      console.log('Invalidated statistics cache (stats_cache.json).');
+      await query('DELETE FROM app_cache WHERE key = $1', ['stats']);
+      console.log('Invalidated statistics cache.');
     } catch (err: any) {
       console.error('Failed to invalidate stats cache:', err.message);
     }

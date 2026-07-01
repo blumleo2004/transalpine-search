@@ -11,8 +11,7 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/favicon.ico') ||
     pathname === '/login' ||
     pathname === '/api/login' ||
-    pathname === '/api/keepalive' ||
-    pathname === '/api/debug'
+    pathname === '/api/keepalive'
   ) {
     return NextResponse.next();
   }

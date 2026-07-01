@@ -1,70 +1,93 @@
 # Transalpine Suchmaschine – Projektübersicht für Claude Code
 
 ## Was ist das?
-Eine semantische Suchmaschine für den Podcast **"Transalpina"** (Neue Zürcher Zeitung).
-Nutzer können in Transkripten von 411 Episoden (94.595 Chunks) suchen – nach Themen, Aussagen, Personen.
+Eine semantische Suchmaschine für den Podcast **"Servus. Grüezi. Hallo." (Transalpina)** (Neue Zürcher Zeitung / ZEIT ONLINE).
+Nutzer können in Transkripten von 411 Episoden (94.595 Chunks) suchen – nach Themen, Aussagen, Personen – und sich witzige, insiderlastige Statistiken zum Archiv ansehen.
 
 ## Tech Stack
 - **Frontend/Backend**: Next.js 14 (App Router), TypeScript
-- **Datenbank**: Supabase (PostgreSQL + pgvector)
-- **Embeddings**: OpenAI `text-embedding-3-small` (1536 Dimensionen)
+- **Datenbank**: [Neon](https://neon.tech) (Serverless Postgres + pgvector), zugegriffen via `pg` (kein ORM, rohes SQL)
+- **Embeddings**: OpenAI `text-embedding-3-small`, auf **512 Dimensionen** truncated (`dimensions: 512` Parameter) — siehe "Warum Neon + 512 Dim?" unten
 - **Deployment**: Vercel
 - **Styling**: CSS Modules
 
+## Warum Neon statt Supabase? (Migrationsgeschichte)
+Das Projekt lief ursprünglich auf Supabase Free Tier ("Nano"-Compute). Das führte zu echten, empirisch bestätigten Problemen:
+1. Ein vergessener `pg_cron`-Job (`* * * * *`) versuchte minütlich den Vektor-Index neu zu bauen, kam nie fertig und blockierte sich selbst dauerhaft — das war die Hauptursache für DB-Aussetzer/"resource exhausted".
+2. Selbst nach Bereinigung: Der Nano-Tier war zu schwach, um überhaupt einen HNSW- oder IVFFlat-Index über 94.595 × 1536-dim Vektoren zu bauen (Build blieb nach 20+ Minuten bei "performing k-means" hängen).
+3. Ein Compute-Upgrade bei Supabase ist nur möglich, wenn die gesamte Organisation auf den Pro-Plan ($25/Monat Basis) upgegradet wird — kein günstiges "pay-per-hour"-Upgrade auf Free-Plan-Ebene.
+
+Migration zu Neon (kostenloser Tier, autoscaling Compute) war günstiger, aber Neons Free Tier hat ein hartes **512MB Speicherlimit** — 94.595 Zeilen × 1536-dim Embeddings allein brauchen ~580MB, das Limit wurde beim ersten Migrationsversuch nach 58.000 Zeilen erreicht.
+
+**Lösung**: Alle Chunks mit `dimensions: 512` (statt der vollen 1536) neu embedden lassen. Das reduziert den Speicherbedarf um Faktor 3 (~190MB für Embeddings, ~300MB Gesamtgröße der DB) bei weiterhin guter Retrieval-Qualität. Auf Neons Compute baute der HNSW-Index danach in **2,5 Minuten** (vs. nie fertig auf Supabase Nano).
+
+**Wichtig für zukünftige Ingestion**: `scripts/ingest.ts` muss ebenfalls `dimensions: 512` beim Embedding-Call verwenden (ist bereits so eingestellt) — sonst schlägt der Insert fehl, weil die Spalte `vector(512)` erwartet.
+
 ## Projektstruktur
 ```
-src/app/
-  page.tsx              # Haupt-Suchseite (Client Component)
-  page.module.css       # Styles
-  api/
-    search/route.ts     # Suchendpunkt (hybrid, semantic, exact)
-    context/route.ts    # Kontext-Chunks für einen Zeitstempel
-    episodes/route.ts   # Episodenliste
-    ingest/route.ts     # Ingestion-Endpunkt
+src/
+  lib/db.ts             # pg Connection Pool (DATABASE_URL)
+  app/
+    page.tsx             # Haupt-Suchseite (Client Component)
+    page.module.css       # Styles
+    api/
+      search/route.ts     # Suchendpunkt (hybrid, semantic, exact)
+      context/route.ts    # Kontext-Chunks für einen Zeitstempel
+      episodes/route.ts   # Episodenliste
+      speakers/route.ts   # Sprecher-Zuordnungen pro Episode
+      stats/route.ts      # Öffentliche Statistiken (mit Postgres-Cache)
+      admin/stats/route.ts # Meistgesuchte Begriffe (admin, ?pw=)
+      log-search/route.ts # Anonyme Suchanfragen-Analytics
+      keepalive/route.ts  # Cron-Endpunkt, hält die DB "warm"
+      login/route.ts      # Passwortschutz-Login
+      explain-match/route.ts # LLM-Erklärung "warum ist das relevant?"
 scripts/
-  ingest.ts             # Transkripte einlesen + embedden
-supabase/
-  migrations/           # DB-Schema
-scratch/                # Temporäre Testskripte
+  ingest.ts             # Transkripte einlesen + embedden (RSS → Deepgram → OpenAI → Neon)
+db/
+  schema.sql            # Vollständiges Schema für Neon (einmalig ausführen bei Neuaufsetzung)
 ```
 
-## Datenbank-Schema (Supabase)
+## Datenbank-Schema
+Siehe `db/schema.sql` für die vollständige, aktuelle Definition. Kurzfassung:
 ```sql
-episodes (id text PK, title, audio_url, pub_date, description)
-transcript_chunks (id uuid PK, episode_id FK, speaker, start_time, end_time, content, embedding vector(1536))
+episodes (id text PK, title, audio_url, pub_date, description, duration)
+transcript_chunks (id uuid PK, episode_id FK, speaker, start_time, end_time, content, embedding vector(512))
+speaker_mappings (episode_id, speaker_label, real_name)  -- manuelle Sprecher-Korrektur pro Episode
+search_queries (query, search_type, created_at)          -- anonyme Analytics
+app_cache (key, value jsonb, updated_at)                  -- Cache für /api/stats (24h TTL)
 ```
 
-## Wichtige RPC-Funktion
-```sql
-match_chunks(query_embedding vector, match_threshold float, match_count int, 
-             filter_speakers text[], exclude_speakers text[], filter_year text)
+Indizes: `transcript_chunks_embedding_hnsw_idx` (HNSW, Vektorsuche), `transcript_chunks_content_trgm_idx` (GIN Trigram, beschleunigt `ILIKE '%...%'` für Exakt-/Hybridsuche und die Wortzähl-Statistiken massiv).
+
+## Suchtypen
+- `?type=semantic` (Sinnsuche) — OpenAI Embedding der Query, Cosine-Similarity via HNSW-Index
+- `?type=exact` (Textsuche) — `ILIKE`, beschleunigt durch Trigram-Index
+- `?type=hybrid` (beides kombiniert, Exakt-Treffer werden geboostet)
+
+## Statistiken (`/api/stats`)
+Berechnet u.a. Redeanteile pro Host/Jahr, ein "Wortgewitter" (Wortwolke der meistgenannten Themen), host-spezifische Signalwörter, grenzüberschreitende Ländernennungen und thematische "Duelle" (z.B. Velo 🇨🇭 vs. Fahrrad 🇩🇪/🇦🇹). Alle ~70 Wort-Zähl-Bedingungen werden in **einer** SQL-Abfrage mit `count(*) FILTER (WHERE ...)` berechnet (ein einziger Table-Scan statt ~70 Einzelabfragen). Ergebnis wird für 24h in `app_cache` zwischengespeichert, damit ein Vercel-Cold-Start nicht jedes Mal alles neu berechnet.
+
+## Umgebungsvariablen (Vercel)
 ```
-Nutzt HNSW-Index für Vektor-Ähnlichkeitssuche.
-
-## Bekannte Probleme & Status
-1. **HNSW-Index instabil**: Supabase Free Tier pausiert die DB. Nach Pause muss Index neu aufgebaut werden.
-   - Workaround: Code fällt nach 3s Timeout automatisch auf Textsuche (ilike) zurück
-   - Echter Fix: Supabase Pro ($25/Mo) oder Migration zu Neon.tech
-
-2. **Duplikat-Funktion**: Es gibt zwei `match_chunks` Varianten (mit/ohne Filter-Params).
-   - Fix: `DROP FUNCTION IF EXISTS match_chunks(vector, float, int);` im SQL Editor ausführen
-
-3. **Suchtypen**: `?type=semantic` (Sinnsuche), `?type=exact` (Textsuche), `?type=hybrid` (beides)
-
-## Umgebungsvariablen (.env.local)
+DATABASE_URL              # Neon Postgres Connection String
+OPENAI_API_KEY
+DEEPGRAM_API_KEY          # nur für scripts/ingest.ts (Transkription neuer Folgen)
+RSS_FEED_URL
+APP_PASSWORD              # Passwortschutz-Gate (Cookie-Session)
+ADMIN_PASSWORD            # Schutz für /api/admin/stats
 ```
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-OPENAI_API_KEY=
-```
+Alle Vercel-Env-Vars sind als "Sensitive" markiert → Werte können nicht per `vercel env pull` ausgelesen werden, nur zur Laufzeit in den Functions selbst.
 
 ## Deployment
 - GitHub: `blumleo2004/transalpine-search`
 - Vercel: automatisch bei Push auf `main`
-- `npm run dev` für lokale Entwicklung
+- Cron: `/api/keepalive` (2×/Woche) hält die DB warm — **wichtig**: dieser Pfad muss in `src/middleware.ts` von der Passwort-Gate ausgenommen bleiben, sonst schlägt der Cron-Call mit 401 fehl, ohne dass die DB je erreicht wird (das war lange Zeit unbemerkt der Fall)
+- `npm run dev` für lokale Entwicklung (braucht `DATABASE_URL` etc. in `.env.local`)
+- `npm run ingest` für manuelle Ingestion neuer Episoden (`-- --pre-scan` für Dry-Run, `--force` zum Neu-Verarbeiten)
 
-## Nächste Schritte (offene TODOs)
-- [ ] Duplikat-Funktion im SQL Editor löschen
-- [ ] HNSW-Index dauerhaft stabilisieren (oder Neon.tech Migration)
-- [ ] Supabase Free Tier → Pro upgraden für stabile Performance
+## Status (Stand: nach Migration)
+- ✅ Sinnsuche funktioniert, ~60-100ms Antwortzeit
+- ✅ Exakt-/Hybridsuche schnell dank Trigram-Index
+- ✅ Statistiken laufen über effiziente Batch-Queries + Cache
+- ✅ Kein Vendor-Lock mehr auf einen zu schwachen Free-Tier
+- Offene Ideen für später: Sprecher-Mappings (`speaker_mappings`) sind aktuell leer — könnten UI-seitig befüllt werden, um "Sprecher 0/1/2"-Reste in älteren Folgen in echte Namen zu übersetzen.

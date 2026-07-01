@@ -1,25 +1,17 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return NextResponse.json({ ok: false, error: 'No Supabase config' }, { status: 500 });
+  if (!process.env.DATABASE_URL) {
+    return NextResponse.json({ ok: false, error: 'No database config' }, { status: 500 });
   }
 
-  const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
-
-  const { count, error } = await supabase
-    .from('transcript_chunks')
-    .select('*', { count: 'exact', head: true });
-
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  try {
+    const rows = await query<{ count: string }>('SELECT count(*) FROM transcript_chunks');
+    return NextResponse.json({ ok: true, chunks: Number(rows[0].count), ts: new Date().toISOString() });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
   }
-
-  return NextResponse.json({ ok: true, chunks: count, ts: new Date().toISOString() });
 }

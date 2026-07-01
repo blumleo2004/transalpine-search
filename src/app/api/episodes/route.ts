@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { query } from '@/lib/db';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -7,77 +7,64 @@ export async function GET(request: Request) {
   const page = parseInt(searchParams.get('page') || '1');
   const perPage = parseInt(searchParams.get('perPage') || '20');
   const year = searchParams.get('year') || 'all';
-  const sort = searchParams.get('sort') || 'newest'; // 'newest' | 'oldest'
+  const sort = searchParams.get('sort') || 'newest';
 
-  const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!hasSupabase) {
+  if (!process.env.DATABASE_URL) {
     if (id) return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
     return NextResponse.json({ episodes: [], total: 0, page, perPage });
   }
 
   try {
-    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-
-    // If a single ID is requested
     if (id) {
-      const { data: episode, error } = await supabase
-        .from('episodes')
-        .select('id, title, pub_date, audio_url')
-        .eq('id', id)
-        .single();
-
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 404 });
+      const rows = await query<any>(
+        'SELECT id, title, pub_date, audio_url FROM episodes WHERE id = $1',
+        [id]
+      );
+      if (rows.length === 0) {
+        return NextResponse.json({ error: 'Episode not found' }, { status: 404 });
       }
-      return NextResponse.json({ episode });
+      return NextResponse.json({ episode: rows[0] });
     }
 
-    // Build query
-    let query = supabase
-      .from('episodes')
-      .select('id, title, pub_date, audio_url', { count: 'exact' });
+    const filters: string[] = [];
+    const params: any[] = [];
+    let i = 1;
 
-    // Year filter
     if (year && year !== 'all') {
-      const yearStart = `${year}-01-01T00:00:00.000Z`;
-      const yearEnd = `${parseInt(year) + 1}-01-01T00:00:00.000Z`;
-      query = query.gte('pub_date', yearStart).lt('pub_date', yearEnd);
+      filters.push(`pub_date >= $${i++} AND pub_date < $${i++}`);
+      params.push(`${year}-01-01T00:00:00.000Z`, `${parseInt(year) + 1}-01-01T00:00:00.000Z`);
     }
 
-    // Sort
-    query = query.order('pub_date', { ascending: sort === 'oldest' });
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const orderClause = `ORDER BY pub_date ${sort === 'oldest' ? 'ASC' : 'DESC'}`;
+    const offset = (page - 1) * perPage;
 
-    // Pagination
-    const from = (page - 1) * perPage;
-    const to = from + perPage - 1;
-    query = query.range(from, to);
+    const countRows = await query<{ count: string }>(
+      `SELECT count(*) FROM episodes ${whereClause}`,
+      params
+    );
+    const total = Number(countRows[0].count);
 
-    const { data, error, count } = await query;
-
-    if (error) throw error;
-
-    // For each episode, get chunk count
-    const episodesWithMeta = await Promise.all(
-      (data || []).map(async (ep) => {
-        const { count: chunkCount } = await supabase
-          .from('transcript_chunks')
-          .select('id', { count: 'exact', head: true })
-          .eq('episode_id', ep.id);
-
-        return {
-          ...ep,
-          chunk_count: chunkCount || 0,
-        };
-      })
+    const episodeRows = await query<any>(
+      `SELECT id, title, pub_date, audio_url FROM episodes ${whereClause} ${orderClause} LIMIT $${i++} OFFSET $${i++}`,
+      [...params, perPage, offset]
     );
 
-    return NextResponse.json({
-      episodes: episodesWithMeta,
-      total: count || 0,
-      page,
-      perPage,
-    });
+    const episodeIds = episodeRows.map((e) => e.id);
+    const chunkCounts = episodeIds.length
+      ? await query<{ episode_id: string; count: string }>(
+          `SELECT episode_id, count(*) FROM transcript_chunks WHERE episode_id = ANY($1) GROUP BY episode_id`,
+          [episodeIds]
+        )
+      : [];
+    const countMap = new Map(chunkCounts.map((c) => [c.episode_id, Number(c.count)]));
+
+    const episodesWithMeta = episodeRows.map((ep) => ({
+      ...ep,
+      chunk_count: countMap.get(ep.id) || 0,
+    }));
+
+    return NextResponse.json({ episodes: episodesWithMeta, total, page, perPage });
   } catch (err: any) {
     console.error('Episodes API error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });

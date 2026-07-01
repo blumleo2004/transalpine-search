@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { query } from '@/lib/db';
 
 export async function POST(request: Request) {
-  const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!hasSupabase) {
+  if (!process.env.DATABASE_URL) {
     return NextResponse.json({ success: false, error: 'Database not configured' }, { status: 500 });
   }
 
@@ -15,16 +13,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Query q is required' }, { status: 400 });
     }
 
-    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-
-    const { error } = await supabase
-      .from('search_queries')
-      .insert({
-        query: q.trim().substring(0, 100), // Limit query string length for safety
-        search_type: type || 'semantic'
-      });
-
-    if (error) throw error;
+    await query(
+      'INSERT INTO search_queries (query, search_type) VALUES ($1, $2)',
+      [q.trim().substring(0, 100), type || 'semantic']
+    );
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

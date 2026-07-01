@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { query } from '@/lib/db';
 
-// GET: Fetch speaker mappings for an episode
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const episodeId = searchParams.get('episode_id');
@@ -10,32 +9,24 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'episode_id is required' }, { status: 400 });
   }
 
-  const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!hasSupabase) {
+  if (!process.env.DATABASE_URL) {
     return NextResponse.json({ mappings: [] });
   }
 
   try {
-    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-
-    const { data, error } = await supabase
-      .from('speaker_mappings')
-      .select('speaker_label, real_name')
-      .eq('episode_id', episodeId);
-
-    if (error) throw error;
-
-    return NextResponse.json({ mappings: data || [] });
+    const mappings = await query<any>(
+      'SELECT speaker_label, real_name FROM speaker_mappings WHERE episode_id = $1',
+      [episodeId]
+    );
+    return NextResponse.json({ mappings });
   } catch (err: any) {
     console.error('Speaker mappings GET error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// POST: Save speaker mappings for an episode
 export async function POST(request: Request) {
-  const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!hasSupabase) {
+  if (!process.env.DATABASE_URL) {
     return NextResponse.json({ error: 'No database configured' }, { status: 500 });
   }
 
@@ -47,24 +38,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'episode_id and mappings[] are required' }, { status: 400 });
     }
 
-    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-
-    // Upsert each mapping
     for (const mapping of mappings) {
       if (!mapping.speaker_label || !mapping.real_name) continue;
 
-      const { error } = await supabase
-        .from('speaker_mappings')
-        .upsert(
-          {
-            episode_id,
-            speaker_label: mapping.speaker_label,
-            real_name: mapping.real_name.trim(),
-          },
-          { onConflict: 'episode_id,speaker_label' }
-        );
-
-      if (error) throw error;
+      await query(
+        `INSERT INTO speaker_mappings (episode_id, speaker_label, real_name)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (episode_id, speaker_label) DO UPDATE SET real_name = EXCLUDED.real_name`,
+        [episode_id, mapping.speaker_label, mapping.real_name.trim()]
+      );
     }
 
     return NextResponse.json({ success: true });

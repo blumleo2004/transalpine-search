@@ -10,16 +10,17 @@
     "ingest": "tsx scripts/ingest.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.43.2",
     "dotenv": "^16.4.5",
     "next": "^14.2.3",
     "openai": "^4.47.1",
+    "pg": "^8.22.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "rss-parser": "^3.13.0"
   },
   "devDependencies": {
     "@types/node": "^20.12.12",
+    "@types/pg": "^8.20.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "eslint": "^8.57.0",
