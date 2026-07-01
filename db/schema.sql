@@ -16,10 +16,12 @@ CREATE TABLE IF NOT EXISTS episodes (
   created_at timestamptz DEFAULT now()
 );
 
--- embedding ist vector(512): OpenAI text-embedding-3-small mit dimensions=512
--- (nicht die volle 1536-dim Ausgabe!). Grund: 94.595 Chunks × 1536 Dimensionen
--- sprengen das 512MB-Speicherlimit von Neons kostenlosem Tier; 512 Dimensionen
--- passen komfortabel (~300MB Gesamtgröße) bei weiterhin guter Retrieval-Qualität.
+-- embedding ist vector(256): OpenAI text-embedding-3-small mit dimensions=256
+-- (nicht die volle 1536-dim Ausgabe!). Grund: bei 94.595 Chunks braucht selbst
+-- 512 Dimensionen zusammen mit dem HNSW-Index (der pro Knoten eine volle
+-- Vektorkopie speichert) über 560MB -- das sprengt Neons 512MB-Freetier-Limit.
+-- 256 Dimensionen halbieren Rohdaten- UND Indexgröße nochmal (~300MB gesamt)
+-- bei weiterhin guter Retrieval-Qualität (OpenAI Matryoshka-Truncation).
 CREATE TABLE IF NOT EXISTS transcript_chunks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   episode_id text REFERENCES episodes(id) ON DELETE CASCADE NOT NULL,
@@ -27,7 +29,7 @@ CREATE TABLE IF NOT EXISTS transcript_chunks (
   start_time numeric NOT NULL,
   end_time numeric NOT NULL,
   content text NOT NULL,
-  embedding vector(512) NOT NULL,
+  embedding vector(256) NOT NULL,
   created_at timestamptz DEFAULT now()
 );
 

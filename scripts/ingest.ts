@@ -712,18 +712,18 @@ async function main() {
             const embResponse = await openai.embeddings.create({
               model: 'text-embedding-3-small',
               input: chunk.content,
-              dimensions: 512,
+              dimensions: 256,
               encoding_format: 'float'
             });
             embedding = embResponse.data[0].embedding;
           } catch (err: any) {
             console.error(`  Embedding generation failed for chunk: "${chunk.content.substring(0, 30)}...":`, err.message);
             // Fallback to mock embedding on error
-            embedding = Array.from({ length: 512 }, () => (Math.random() - 0.5) * 0.1);
+            embedding = Array.from({ length: 256 }, () => (Math.random() - 0.5) * 0.1);
           }
         } else {
           // Mock embedding
-          embedding = Array.from({ length: 512 }, () => (Math.random() - 0.5) * 0.1);
+          embedding = Array.from({ length: 256 }, () => (Math.random() - 0.5) * 0.1);
         }
         return {
           ...chunk,

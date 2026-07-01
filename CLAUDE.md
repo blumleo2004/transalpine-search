@@ -7,21 +7,21 @@ Nutzer können in Transkripten von 411 Episoden (94.595 Chunks) suchen – nach 
 ## Tech Stack
 - **Frontend/Backend**: Next.js 14 (App Router), TypeScript
 - **Datenbank**: [Neon](https://neon.tech) (Serverless Postgres + pgvector), zugegriffen via `pg` (kein ORM, rohes SQL)
-- **Embeddings**: OpenAI `text-embedding-3-small`, auf **512 Dimensionen** truncated (`dimensions: 512` Parameter) — siehe "Warum Neon + 512 Dim?" unten
+- **Embeddings**: OpenAI `text-embedding-3-small`, auf **256 Dimensionen** truncated (`dimensions: 256` Parameter) — siehe "Warum Neon + 256 Dim?" unten
 - **Deployment**: Vercel
 - **Styling**: CSS Modules
 
-## Warum Neon statt Supabase? (Migrationsgeschichte)
+## Warum Neon statt Supabase, und warum 256 statt 1536 Dimensionen? (Migrationsgeschichte)
 Das Projekt lief ursprünglich auf Supabase Free Tier ("Nano"-Compute). Das führte zu echten, empirisch bestätigten Problemen:
 1. Ein vergessener `pg_cron`-Job (`* * * * *`) versuchte minütlich den Vektor-Index neu zu bauen, kam nie fertig und blockierte sich selbst dauerhaft — das war die Hauptursache für DB-Aussetzer/"resource exhausted".
 2. Selbst nach Bereinigung: Der Nano-Tier war zu schwach, um überhaupt einen HNSW- oder IVFFlat-Index über 94.595 × 1536-dim Vektoren zu bauen (Build blieb nach 20+ Minuten bei "performing k-means" hängen).
 3. Ein Compute-Upgrade bei Supabase ist nur möglich, wenn die gesamte Organisation auf den Pro-Plan ($25/Monat Basis) upgegradet wird — kein günstiges "pay-per-hour"-Upgrade auf Free-Plan-Ebene.
 
-Migration zu Neon (kostenloser Tier, autoscaling Compute) war günstiger, aber Neons Free Tier hat ein hartes **512MB Speicherlimit** — 94.595 Zeilen × 1536-dim Embeddings allein brauchen ~580MB, das Limit wurde beim ersten Migrationsversuch nach 58.000 Zeilen erreicht.
+Migration zu Neon (kostenloser Tier, autoscaling Compute) war günstiger, aber Neons Free Tier hat ein hartes **512MB Speicherlimit**. Der erste Migrationsversuch mit den originalen 1536-dim Embeddings scheiterte nach 58.000 von 94.595 Zeilen, weil die Rohdaten allein schon ~580MB brauchen.
 
-**Lösung**: Alle Chunks mit `dimensions: 512` (statt der vollen 1536) neu embedden lassen. Das reduziert den Speicherbedarf um Faktor 3 (~190MB für Embeddings, ~300MB Gesamtgröße der DB) bei weiterhin guter Retrieval-Qualität. Auf Neons Compute baute der HNSW-Index danach in **2,5 Minuten** (vs. nie fertig auf Supabase Nano).
+**Lösung**: Alle Chunks mit `dimensions: 256` (statt der vollen 1536) neu embedden lassen. Ein Zwischenschritt bei 512 Dimensionen zeigte: pgvectors HNSW-Index speichert pro Knoten eine volle Vektorkopie, wodurch der Index fast so groß wie die Rohdaten selbst wird — bei 512 Dim landete die Gesamtgröße bei ~568MB, wieder über dem Limit. Bei 256 Dimensionen liegt die Gesamtgröße bei ~300MB, mit komfortablem Puffer. Auf Neons Compute baute der HNSW-Index in **2,5 Minuten** (vs. nie fertig auf Supabase Nano).
 
-**Wichtig für zukünftige Ingestion**: `scripts/ingest.ts` muss ebenfalls `dimensions: 512` beim Embedding-Call verwenden (ist bereits so eingestellt) — sonst schlägt der Insert fehl, weil die Spalte `vector(512)` erwartet.
+**Wichtig für zukünftige Ingestion**: `scripts/ingest.ts` muss ebenfalls `dimensions: 256` beim Embedding-Call verwenden (ist bereits so eingestellt) — sonst schlägt der Insert fehl, weil die Spalte `vector(256)` erwartet.
 
 ## Projektstruktur
 ```
@@ -51,7 +51,7 @@ db/
 Siehe `db/schema.sql` für die vollständige, aktuelle Definition. Kurzfassung:
 ```sql
 episodes (id text PK, title, audio_url, pub_date, description, duration)
-transcript_chunks (id uuid PK, episode_id FK, speaker, start_time, end_time, content, embedding vector(512))
+transcript_chunks (id uuid PK, episode_id FK, speaker, start_time, end_time, content, embedding vector(256))
 speaker_mappings (episode_id, speaker_label, real_name)  -- manuelle Sprecher-Korrektur pro Episode
 search_queries (query, search_type, created_at)          -- anonyme Analytics
 app_cache (key, value jsonb, updated_at)                  -- Cache für /api/stats (24h TTL)

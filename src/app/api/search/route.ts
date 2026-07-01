@@ -111,7 +111,7 @@ export async function GET(request: Request) {
       if (!hasOpenAI || process.env.DISABLE_VECTOR_SEARCH) return [];
       try {
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const embResponse = await openai.embeddings.create({ model: 'text-embedding-3-small', input: q, dimensions: 512 });
+        const embResponse = await openai.embeddings.create({ model: 'text-embedding-3-small', input: q, dimensions: 256 });
         const embedding = `[${embResponse.data[0].embedding.join(',')}]`;
 
         const { clause, params } = buildFilterClause(dbSpeakers, dbExcludeSpeakers, filterYear, 3);
