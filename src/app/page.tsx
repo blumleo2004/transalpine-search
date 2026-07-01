@@ -1013,21 +1013,9 @@ export default function SearchPage() {
 
               {!loading && hasSearched && searchError && (
                 <div className={styles.errorState}>
-                  <div className={styles.errorStateIcon}>⚠️</div>
-                  <h3>Suche fehlgeschlagen</h3>
-                  <p className={styles.errorMessage}>{searchError}</p>
-                  {searchError.toLowerCase().includes('timeout') && (
-                    <div className={styles.errorAdvice}>
-                      <strong>Mögliche Ursache:</strong> Die Datenbank-Abfrage ist in ein Zeitlimit gelaufen. 
-                      Das liegt in der Regel daran, dass der <strong>HNSW-Index (Vektor-Index)</strong> in der Supabase-Datenbank gelöscht oder noch nicht wieder aufgebaut wurde.
-                      <br /><br />
-                      Führe bitte im Supabase SQL Editor folgenden Befehl aus, um den Index wieder aufzubauen (optimierte Parameter gegen Timeouts):
-                      <pre style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '4px', marginTop: '10px', fontSize: '0.85rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                        {`DROP INDEX IF EXISTS transcript_chunks_embedding_hnsw_idx;\n\nCREATE INDEX transcript_chunks_embedding_hnsw_idx \nON transcript_chunks \nUSING hnsw (embedding vector_cosine_ops)\nWITH (m = 8, ef_construction = 16);`}
-                      </pre>
-                      Dies baut den Index deutlich schneller (ca. 15–30 Sekunden) und stabil auf!
-                    </div>
-                  )}
+                  <div className={styles.errorStateIcon}>⚠</div>
+                  <h3>Die Suche hat gerade ein Problem</h3>
+                  <p>Versuch's in ein paar Sekunden nochmal.</p>
                 </div>
               )}
 
@@ -1226,9 +1214,12 @@ export default function SearchPage() {
         {activeTab === 'stats' && (
           <section className={styles.statsSection}>
             {statsLoading ? (
-              <div className={styles.loadingContainer}>
-                <div className={styles.spinner}></div>
-                <p>Statistiken werden geladen...</p>
+              <div className={styles.bentoHero}>
+                <div className={`${styles.bentoFeature} ${styles.skeleton}`} />
+                <div className={`${styles.bentoTile} ${styles.skeleton}`} />
+                <div className={`${styles.bentoTile} ${styles.skeleton}`} />
+                <div className={`${styles.bentoTile} ${styles.skeleton}`} />
+                <div className={`${styles.bentoTile} ${styles.skeleton}`} />
               </div>
             ) : stats ? (
               <>
