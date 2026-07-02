@@ -47,6 +47,7 @@ interface StatsData {
   speakerDistribution: Record<string, number>;
   speakerSharesByYear?: Record<string, Record<string, number>>;
   keywordMentions?: { label: string; count: number }[];
+  topWords?: { word: string; count: number }[];
   hostWordCounts?: { host: string; words: { word: string; count: number }[] }[];
   crossBorderMentions?: Record<string, Record<string, number>>;
   yesNoButCounts?: { host: string; ja: number; nein: number; aber: number }[];
@@ -1563,63 +1564,48 @@ export default function SearchPage() {
 
 
                 {/* ── Das transalpine Wortgewitter (Interaktive Wortwolke) ── */}
-                {stats.keywordMentions && stats.keywordMentions.length > 0 && (
+                {stats.topWords && stats.topWords.length > 0 && (
                   <div className={styles.chartCard} style={{ marginTop: '24px' }}>
                     <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Das transalpine Wortgewitter</h3>
                     <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '-8px', marginBottom: '20px', lineHeight: '1.4' }}>
-                      Die meistdiskutierten Begriffe im gesamten Podcast-Archiv. Die Schriftgröße zeigt die Häufigkeit der Nennung. Ein Klick startet direkt eine Echtzeit-Suche!
+                      Die tatsächlich meistgesagten Wörter im gesamten Podcast-Archiv (Füllwörter ausgenommen). Die Schriftgröße zeigt die Häufigkeit der Nennung. Ein Klick startet direkt eine Echtzeit-Suche!
                     </p>
                     <div className={styles.inlineStatRow}>
                       <span className={styles.inlineStatLabel}>Meistgenanntes Getränk:</span>
                       <span className={styles.inlineStatValue}>{favDrink.value} — {favDrink.subtext}</span>
                     </div>
                     <div className={styles.wordCloudWrapper}>
-                      {stableShuffle(stats.keywordMentions, 'servus-gruezi-hallo-wordcloud').map((item, idx) => {
-                        const counts = (stats.keywordMentions || []).map(m => m.count);
+                      {(() => {
+                        const items = stableShuffle(
+                          stats.topWords.map((w) => ({ label: w.word, count: w.count })),
+                          'servus-gruezi-hallo-wordcloud'
+                        );
+                        const counts = items.map((m) => m.count);
                         const maxCount = Math.max(...counts, 1);
                         const minCount = Math.min(...counts, 0);
-                        
-                        // Font size calculation (ranges from 0.85rem to 2.5rem)
-                        const ratio = maxCount > minCount ? (item.count - minCount) / (maxCount - minCount) : 0.5;
-                        const fontSize = `${0.85 + ratio * 1.65}rem`;
-                        
-                        // Color styling based on flags / keywords
-                        let color = '#fbbf24'; // Neutral gold/yellow default
-                        if (item.label.includes('🇨🇭') || item.label.includes('Velo') || item.label.includes('Kanton') || item.label.includes('Blocher') || item.label.includes('Initiative') || item.label.includes('Schweiz')) {
-                          color = '#6ee7b7'; // Swiss Green
-                        } else if (item.label.includes('🇦🇹') || item.label.includes('Wien') || item.label.includes('Benko') || item.label.includes('Nehammer') || item.label.includes('bissel') || item.label.includes('Österreich') || item.label.includes('Schnitzel')) {
-                          color = '#93c5fd'; // Austrian Blue
-                        } else if (item.label.includes('🇩🇪') || item.label.includes('Berlin') || item.label.includes('Scholz') || item.label.includes('Fahrrad') || item.label.includes('bisschen') || item.label.includes('Deutschland') || item.label.includes('Wurst')) {
-                          color = '#fca5a5'; // German Red
-                        } else if (item.label.includes('Alpen') || item.label.includes('Krise')) {
-                          color = '#60a5fa'; // Light Blue
-                        } else if (item.label.includes('Europa') || item.label.includes('Klima')) {
-                          color = '#a7f3d0'; // Light Green
-                        } else if (item.label.includes('Geld') || item.label.includes('Bier') || item.label.includes('Käse')) {
-                          color = '#fde68a'; // Cream yellow
-                        }
-
-                        // Determine opacity based on count to create depth
-                        const opacity = 0.6 + ratio * 0.4;
-
-                        return (
-                          <span
-                            key={idx}
-                            className={styles.wordTag}
-                            style={{
-                              fontSize,
-                              color,
-                              opacity,
-                              border: `1px solid ${color}22`
-                            }}
-                            onClick={() => handleWordClick(item.label)}
-                            title={`"${getCleanQuery(item.label)}" wurde ${item.count}x erwähnt. Klick zum Suchen.`}
-                          >
-                            {item.label}
-                            <span className={styles.wordCountBadge}>{item.count}</span>
-                          </span>
-                        );
-                      })}
+                        return items.map((item, idx) => {
+                          const ratio = maxCount > minCount ? (item.count - minCount) / (maxCount - minCount) : 0.5;
+                          const fontSize = `${0.85 + ratio * 1.65}rem`;
+                          const opacity = 0.6 + ratio * 0.4;
+                          return (
+                            <span
+                              key={idx}
+                              className={styles.wordTag}
+                              style={{
+                                fontSize,
+                                color: 'var(--accent-gold)',
+                                opacity,
+                                border: '1px solid rgba(var(--accent-gold-rgb), 0.15)',
+                              }}
+                              onClick={() => handleWordClick(item.label)}
+                              title={`"${item.label}" wurde ${item.count}x gesagt. Klick zum Suchen.`}
+                            >
+                              {item.label}
+                              <span className={styles.wordCountBadge}>{item.count}</span>
+                            </span>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 )}

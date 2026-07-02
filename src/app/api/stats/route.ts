@@ -62,6 +62,46 @@ const HOST_SIGNATURE_WORDS: Record<string, string[]> = {
 
 const YES_NO_BUT_WORDS = ['ja', 'nein', 'aber'] as const;
 
+// German stopwords + filler words excluded from the "top words" word cloud,
+// so it surfaces genuinely distinctive terms (people, parties, topics)
+// instead of "und", "also", "eigentlich".
+const STOPWORDS = new Set([
+  'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einen', 'einem', 'einer', 'eines',
+  'und', 'oder', 'aber', 'doch', 'auch', 'noch', 'nur', 'schon', 'so', 'wie', 'was', 'wer', 'wo',
+  'wann', 'warum', 'wieso', 'weshalb', 'dass', 'ob', 'weil', 'wenn', 'als', 'also', 'dann', 'denn',
+  'ist', 'sind', 'war', 'waren', 'wird', 'werden', 'wurde', 'wurden', 'sein', 'seine', 'seiner',
+  'seinem', 'seinen', 'ihre', 'ihrer', 'ihrem', 'ihren', 'unser', 'unsere', 'unserer', 'euer',
+  'eure', 'mein', 'meine', 'meiner', 'meinem', 'meinen', 'dein', 'deine', 'deiner', 'deinem',
+  'ich', 'du', 'er', 'sie', 'es', 'wir', 'ihr', 'man', 'mich', 'dich', 'sich', 'uns', 'euch',
+  'mir', 'dir', 'ihm', 'ihn', 'ihnen', 'nicht', 'kein', 'keine', 'keinen', 'keinem', 'keiner',
+  'mit', 'ohne', 'auf', 'für', 'von', 'zu', 'zum', 'zur', 'im', 'in', 'an', 'am', 'aus', 'bei',
+  'nach', 'über', 'unter', 'vor', 'zwischen', 'durch', 'gegen', 'um', 'bis', 'seit', 'während',
+  'hat', 'habe', 'habt', 'haben', 'hatte', 'hatten', 'kann', 'kannst', 'können', 'konnte', 'konnten',
+  'muss', 'musst', 'müssen', 'musste', 'mussten', 'soll', 'sollst', 'sollen', 'sollte', 'sollten',
+  'will', 'willst', 'wollen', 'wollte', 'wollten', 'mag', 'mögen', 'darf', 'dürfen',
+  'mehr', 'sehr', 'ganz', 'ziemlich', 'eigentlich', 'genau', 'halt', 'quasi', 'irgendwie',
+  'einfach', 'natürlich', 'klar', 'okay', 'ja', 'nein', 'äh', 'ähm', 'äham', 'öh', 'na', 'ne',
+  'jetzt', 'dann', 'heute', 'morgen', 'gestern', 'immer', 'nie', 'nochmal', 'wieder', 'schon',
+  'diese', 'dieser', 'dieses', 'diesen', 'diesem', 'jene', 'jener', 'jenes', 'alle', 'alles',
+  'allen', 'aller', 'jede', 'jeder', 'jedes', 'jeden', 'jedem', 'viel', 'viele', 'vielen', 'vieler',
+  'wenig', 'wenige', 'wenigen', 'andere', 'anderen', 'anderer', 'anderes', 'selbst', 'gar',
+  'sondern', 'trotzdem', 'deshalb', 'daher', 'darum', 'also', 'zwar', 'sowie', 'sowohl',
+  'gibt', 'gab', 'geht', 'ging', 'macht', 'gemacht', 'sagen', 'gesagt', 'sagt', 'finde', 'find',
+  'glaube', 'glaub', 'denke', 'denk', 'weiß', 'wissen', 'wusste', 'sehe', 'sehen', 'gesehen',
+  'komme', 'kommt', 'kommen', 'gekommen',
+  'mal', 'hab', 'eben', 'wirklich', 'zeit', 'beispiel', 'vielleicht', 'hast', 'hier', 'dort',
+  'machen', 'gemacht', 'macht', 'gut', 'dazu', 'etwas', 'damit', 'davon', 'dabei', 'dafür',
+  'nämlich', 'bissel', 'bisschen', 'ehrlich', 'irgendwas', 'irgendwie', 'grundsätzlich',
+  'tatsächlich', 'offenbar', 'wohl', 'obwohl', 'allerdings', 'jedoch', 'dennoch', 'stattdessen',
+  'immerhin', 'letztendlich', 'insgesamt', 'insofern', 'letztlich', 'relativ', 'generell',
+  'einerseits', 'andererseits', 'sozusagen', 'außerdem', 'gewesen', 'gerade', 'schon',
+  'irgendein', 'irgendwelche', 'irgendjemand', 'überhaupt', 'jedenfalls', 'sicherlich',
+  'natürlich', 'anscheinend', 'übrigens', 'zumindest', 'zumal', 'weiterhin', 'weiter',
+  'raus', 'rein', 'rüber', 'rauf', 'runter', 'los', 'weg', 'zurück',
+  'bin', 'bist', 'seid', 'würde', 'würdest', 'würden', 'kurz', 'allem', 'richtig', 'recht',
+  'paar', 'vom', 'heißt', 'zwei', 'drei', 'vier', 'fünf', 'erste', 'zweite', 'dritte',
+]);
+
 // Postgres has a hard limit of 65535 bound params per query, and FILTER
 // clauses fired one-per-keyword still only cost a single sequential/index
 // scan of the table (vs. the ~68 separate round trips this used to take).
@@ -199,6 +239,25 @@ async function computeStats() {
     distinctWords: Number(vocabRows.find((r) => r.speaker === host)?.distinct_words) || 0,
   }));
 
+  // Data-driven "top words" for the word cloud, instead of a fixed curated
+  // list: real most-frequent words across the archive, minus stopwords and
+  // very short words. Grouped on lowercase for accurate counting; displayed
+  // capitalized (a reasonable approximation of German proper nouns/nouns).
+  const topWordRows = await query<{ word: string; cnt: string }>(`
+    SELECT word, count(*) AS cnt
+    FROM transcript_chunks,
+         unnest(regexp_split_to_array(lower(content), '[^a-zäöüßA-ZÄÖÜ]+')) AS word
+    WHERE length(word) > 2 AND NOT (word = ANY($1))
+    GROUP BY word
+    ORDER BY cnt DESC
+    LIMIT 45
+  `, [Array.from(STOPWORDS)]);
+
+  const topWords = topWordRows.map((r) => ({
+    word: r.word.charAt(0).toUpperCase() + r.word.slice(1),
+    count: Number(r.cnt),
+  }));
+
   return {
     totalEpisodes: episodes.length,
     totalChunks,
@@ -211,6 +270,7 @@ async function computeStats() {
     crossBorderMentions,
     yesNoButCounts,
     vocabularySizes,
+    topWords,
     latestEpisode: episodes[0] || null,
     oldestEpisode: episodes[episodes.length - 1] || null,
     topEpisodes,
