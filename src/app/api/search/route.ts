@@ -7,6 +7,10 @@ const CHUNK_SELECT = `
   e.title, e.audio_url, e.pub_date
 `;
 
+// Below this cosine-similarity score a "semantic match" is closer to noise
+// than to a real match — showing it just buries genuinely relevant results.
+const MIN_SEMANTIC_SIMILARITY = 0.4;
+
 function resolveSpeakerFilters(speakerFilters: string[]) {
   let dbSpeakers: string[] | null = null;
   let dbExcludeSpeakers: string[] | null = null;
@@ -123,7 +127,9 @@ export async function GET(request: Request) {
            LIMIT $2`,
           [embedding, limit, ...params]
         );
-        return rows.map((r) => mapRow(r, Number(r.similarity)));
+        return rows
+          .map((r) => mapRow(r, Number(r.similarity)))
+          .filter((r) => r.similarity >= MIN_SEMANTIC_SIMILARITY);
       } catch (err: any) {
         console.warn('Semantic search failed, falling back:', err.message);
         return [];
@@ -159,7 +165,17 @@ export async function GET(request: Request) {
     }
 
     results.sort((a, b) => b.similarity - a.similarity);
-    return NextResponse.json({ results: results.slice(0, 50), mode: `database-${type}` });
+
+    const [{ count: totalOccurrences }] = await query<{ count: string }>(
+      'SELECT count(*) FROM transcript_chunks WHERE content ILIKE $1',
+      [`%${q}%`]
+    );
+
+    return NextResponse.json({
+      results: results.slice(0, 50),
+      totalOccurrences: Number(totalOccurrences),
+      mode: `database-${type}`,
+    });
   } catch (err: any) {
     console.error('Database search failed:', err.message);
     return NextResponse.json(

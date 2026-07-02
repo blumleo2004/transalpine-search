@@ -130,11 +130,15 @@ function groupByEpisode(results: SearchResult[]): EpisodeGroup[] {
     group.avgSimilarity = group.chunks.reduce((sum, c) => sum + c.similarity, 0) / group.chunks.length;
     group.chunks.sort((a, b) => b.similarity - a.similarity);
   }
-  // Sort episodes by: number of matching chunks * average similarity (relevance score)
+  // Sort episodes primarily by their single best match (an exact hit or a
+  // strong semantic match should always outrank an episode that only has
+  // several weak/noisy matches), then by chunk count as a tiebreaker.
+  // Previously this weighted chunks.length * avgSimilarity, which let an
+  // episode with three 35%-similarity chunks outrank one with a single
+  // 100% exact match.
   allGroups.sort((a, b) => {
-    const scoreA = a.chunks.length * a.avgSimilarity;
-    const scoreB = b.chunks.length * b.avgSimilarity;
-    return scoreB - scoreA;
+    if (b.maxSimilarity !== a.maxSimilarity) return b.maxSimilarity - a.maxSimilarity;
+    return b.chunks.length - a.chunks.length;
   });
   return allGroups;
 }
@@ -198,6 +202,7 @@ export default function SearchPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [searchMode, setSearchMode] = useState<string>('');
+  const [totalOccurrences, setTotalOccurrences] = useState<number | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchType, setSearchType] = useState<'semantic' | 'exact' | 'hybrid'>('semantic');
   const [selectedSpeakers, setSelectedSpeakers] = useState<string[]>(['matthias', 'florian', 'lenz', 'guest']);
@@ -367,6 +372,7 @@ export default function SearchPage() {
       const searchResults = data.results || [];
       setResults(searchResults);
       setSearchMode(data.mode || '');
+      setTotalOccurrences(typeof data.totalOccurrences === 'number' ? data.totalOccurrences : null);
 
       // Log search query for analytics asynchronously
       fetch('/api/log-search', {
@@ -380,6 +386,7 @@ export default function SearchPage() {
       console.error(e);
       setSearchError(e.message || 'Search failed');
       setResults([]);
+      setTotalOccurrences(null);
       return [];
     } finally {
       setLoading(false);
@@ -658,12 +665,27 @@ export default function SearchPage() {
 
   // ──── Stats Logic ────
 
+  const STATS_CACHE_KEY = 'transalpine_stats_cache_v2';
+
   const loadStats = async () => {
+    // Show cached stats instantly (from this browser session) instead of a
+    // loading skeleton every time the tab is opened; the server itself
+    // already caches for 24h, this just avoids the client round-trip too.
+    try {
+      const cached = sessionStorage.getItem(STATS_CACHE_KEY);
+      if (cached) {
+        setStats(JSON.parse(cached));
+        return;
+      }
+    } catch { /* sessionStorage unavailable, fall through to fetch */ }
+
     setStatsLoading(true);
     try {
       const res = await fetch('/api/stats');
       if (!res.ok) throw new Error('Failed');
-      setStats(await res.json());
+      const data = await res.json();
+      setStats(data);
+      try { sessionStorage.setItem(STATS_CACHE_KEY, JSON.stringify(data)); } catch { /* ignore quota errors */ }
     } catch (e) { console.error(e); }
     finally { setStatsLoading(false); }
   };
@@ -1031,6 +1053,11 @@ export default function SearchPage() {
                 <div className={styles.resultsGrid}>
                   <div className={styles.resultsHeader}>
                     <h2>{episodeGroups.length} Episode{episodeGroups.length !== 1 ? 'n' : ''} mit {results.length} Treffern</h2>
+                    {totalOccurrences !== null && totalOccurrences > 0 && (
+                      <p className={styles.resultsSubheader}>
+                        „{query}“ wurde insgesamt {totalOccurrences.toLocaleString('de-DE')}x im Archiv gesagt
+                      </p>
+                    )}
                   </div>
 
                   <div className={styles.resultsList}>
@@ -1270,12 +1297,27 @@ export default function SearchPage() {
                     })()}
 
                     {(() => {
-                      const vocab = (stats.vocabularySizes || []).slice().sort((a, b) => b.distinctWords - a.distinctWords)[0];
-                      if (!vocab) return null;
+                      const vocab = stats.vocabularySizes || [];
+                      if (vocab.length === 0) return null;
+                      const maxWords = Math.max(...vocab.map((v) => v.distinctWords), 1);
+                      const flagFor = (name: string): 'CH' | 'AT' | 'DE' =>
+                        name === 'Matthias Daum' ? 'CH' : name === 'Florian Gasser' ? 'AT' : 'DE';
                       return (
                         <div className={styles.bentoTile}>
-                          <div className={styles.bentoTileNumber} style={{ fontSize: '1.1rem' }}>{vocab.host.split(' ')[0]}</div>
-                          <div className={styles.bentoTileLabel}>Wortschatz-Sieger ({vocab.distinctWords.toLocaleString('de-DE')} Wörter)</div>
+                          <div className={styles.bentoTileLabel} style={{ marginTop: 0, marginBottom: '8px' }}>Wortschatz-Vergleich</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            {vocab.map((v) => (
+                              <div key={v.host} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <CountryFlag country={flagFor(v.host)} size={12} />
+                                <div style={{ flex: 1, height: '5px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                                  <div style={{ width: `${(v.distinctWords / maxWords) * 100}%`, height: '100%', background: 'var(--accent-orange)' }} />
+                                </div>
+                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', minWidth: '38px', textAlign: 'right' }}>
+                                  {(v.distinctWords / 1000).toFixed(1)}k
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       );
                     })()}
