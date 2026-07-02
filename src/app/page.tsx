@@ -2085,9 +2085,8 @@ export default function SearchPage() {
               <h3 className={styles.chartTitle}><span className={styles.chartTitleBar} />Über dieses Projekt</h3>
               <div style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: '1.7', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <p>
-                  Das hier ist ein privates Hobbyprojekt — keine offizielle Seite von ZEIT ONLINE oder den Podcast-Machern.
-                  Es durchsucht das komplette Archiv von <strong>„Servus. Grüezi. Hallo.“</strong>, dem transalpinen Politikpodcast
-                  von Matthias Daum, Florian Gasser und Lenz Jacobsen.
+                  Das hier ist ein privates Hobbyprojekt von Leo Blum — keine offizielle Seite von ZEIT ONLINE oder
+                  den Podcast-Machern. Es durchsucht das komplette Archiv von <strong>„Servus. Grüezi. Hallo.“</strong>.
                 </p>
                 <p>
                   <strong>Wie es funktioniert:</strong> Jede Folge wird automatisch transkribiert (Deepgram), in Gesprächsabschnitte
@@ -2096,10 +2095,13 @@ export default function SearchPage() {
                   werden gefunden — daher funktioniert die Suche auch, wenn du nicht die exakten Wörter aus der Folge triffst.
                 </p>
                 <p>
-                  <strong>Ein paar ehrliche Einschränkungen:</strong> Die automatische Sprechererkennung ist nicht perfekt —
-                  gelegentlich wird ein Satz dem falschen Host zugeordnet, besonders bei schnellen Wortwechseln. Datumsangaben
-                  bei älteren Folgen beruhen teils auf Bestmatch-Vergleichen mit Artikeltiteln und können leicht daneben liegen.
-                  Die Statistiken auf der Stats-Seite sind zum Spaß gedacht, nicht als wissenschaftliche Auswertung.
+                  <strong>Ein paar ehrliche Einschränkungen:</strong> Das Ganze ist auf Studenten-Budget gebaut — für
+                  Datenbank-Speicher, Rechenleistung & Co. ist einfach nicht viel Geld da, deshalb läuft hier alles auf
+                  möglichst günstigen Diensten statt in Referenzqualität. Das ist auch mit ein Grund, warum die
+                  automatische Sprechererkennung nicht perfekt ist — gelegentlich wird ein Satz dem falschen Host
+                  zugeordnet, besonders bei schnellen Wortwechseln. Datumsangaben bei älteren Folgen beruhen teils auf
+                  Bestmatch-Vergleichen mit Artikeltiteln und können leicht daneben liegen. Die Statistiken auf der
+                  Stats-Seite sind zum Spaß gedacht, nicht als wissenschaftliche Auswertung.
                 </p>
                 <p style={{ marginTop: '6px' }}>
                   <a href="https://github.com/blumleo2004/transalpine-search" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-gold)' }}>
